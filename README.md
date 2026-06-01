@@ -4,6 +4,16 @@
 
 项目英文名建议使用 **Web Feedback Marker**，GitHub 仓库名建议使用 `web-feedback-marker`。
 
+![Web Feedback Marker product preview](docs/images/product-preview.svg)
+
+## Project Status
+
+当前项目处于 MVP 阶段，已经支持 Chrome 开发者模式本地加载、网页内批注、局部截图证据和 PDF 导出。项目优先保证本地运行、低权限和隐私边界清晰。
+
+## Why This Exists
+
+网页走查反馈经常分散在截图、聊天记录和手写文档里，问题位置、反馈内容和修改建议容易脱节。网页反馈标注器希望把这件事收敛到浏览器里完成：在页面上直接标记问题，保存上下文截图，再导出一份结构化反馈报告。
+
 ## Features
 
 - 在当前网页中边浏览边批注。
@@ -148,8 +158,16 @@ Recommended manual regression checks:
 - Single feedback deletion.
 - More complete regression test coverage.
 - Optional import/export of annotation data.
-- Better demo assets for GitHub release pages.
 - Evaluate lightweight collaboration only if it can remain simple and privacy-aware.
+
+## Open Source and Codex
+
+This repository is maintained as an open-source local-first browser extension. Codex can help with future maintenance work such as:
+
+- reviewing Manifest V3 permission changes;
+- improving PDF export reliability;
+- adding regression tests for annotation edge cases;
+- keeping the local-only privacy model explicit and verifiable.
 
 ## Contributing
 
@@ -158,4 +176,3 @@ Issues and pull requests are welcome. Before contributing, please read [CONTRIBU
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
