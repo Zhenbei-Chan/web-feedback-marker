@@ -1,0 +1,29 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build and release artifacts
+dist/
+release/
+*.zip
+*.crx
+*.pem
+
+# Local-only scratch files
+tmp/
+temp/
+.env
+.env.*
+

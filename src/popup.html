@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>网页反馈标注器</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <img class="brand-mark" src="../assets/icons/icon-48.png" alt="" />
+        <div class="hero-copy">
+          <h1>网页反馈标注器</h1>
+          <p>当前页面反馈收集与导出</p>
+        </div>
+        <button id="guideToggleBtn" class="help-button" type="button" aria-label="查看使用说明" aria-expanded="false" aria-controls="assistPanel">?</button>
+      </header>
+
+      <section class="page-context" aria-label="当前页面">
+        <span>当前页面</span>
+        <p id="pageTitle" class="page-title">读取页面中...</p>
+        <p id="pageUrl" class="page-url"></p>
+      </section>
+
+      <section class="primary-actions" aria-label="主要操作">
+        <button id="startAnnotationBtn" class="primary action-main" type="button">进入批注模式</button>
+        <div class="secondary-actions">
+          <button id="exportPdfBtn" type="button">导出 PDF</button>
+          <button id="clearCurrentBtn" type="button">清空当前页</button>
+        </div>
+      </section>
+
+      <section id="assistPanel" class="assist-panel" hidden>
+        <div class="guide">
+          <h2>使用说明</h2>
+          <ol>
+            <li>进入批注模式后，右下角会出现铅笔悬浮球。</li>
+            <li>选择框选、标记或文本反馈，保存后自动回到浏览模式。</li>
+          </ol>
+        </div>
+
+        <div class="shortcut-panel">
+          <h2>快捷键</h2>
+          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>1</kbd><span>框选</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>2</kbd><span>标记</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>3</kbd><span>文本</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>E</kbd><span>导出</span></div>
+          <div class="shortcut-row is-single"><kbd>Esc</kbd><span>取消或关闭菜单</span></div>
+        </div>
+
+        <button id="guideDismissBtn" class="text-button" type="button">收起说明</button>
+      </section>
+
+      <section class="feedback-section">
+        <div class="section-heading">
+          <h2>反馈清单</h2>
+          <span id="currentCount" class="list-count">共 0 条</span>
+        </div>
+        <div id="feedbackList" class="feedback-list"></div>
+      </section>
+
+      <p id="status" class="status" role="status"></p>
+    </main>
+
+    <script src="./pdf.js"></script>
+    <script src="./popup.js" type="module"></script>
+  </body>
+</html>
