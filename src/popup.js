@@ -52,6 +52,7 @@ function bindEvents() {
   els.clearCurrentBtn.addEventListener("click", clearCurrentPageItems);
   els.guideToggleBtn.addEventListener("click", toggleGuidePanel);
   els.guideDismissBtn.addEventListener("click", dismissGuidePanel);
+  els.feedbackList.addEventListener("click", onFeedbackListClick);
 }
 
 async function injectContentScripts() {
@@ -85,7 +86,7 @@ async function startAnnotationMode() {
 
 async function exportCurrentPagePdf() {
   try {
-    const items = getCurrentPageItems().slice().reverse();
+    const items = getDisplayPageItems();
     if (!items.length) {
       setStatus("当前页面没有可导出的反馈。", true);
       return;
@@ -107,8 +108,40 @@ async function clearCurrentPageItems() {
   const remaining = state.items.filter((item) => item.pageUrl !== currentUrl);
   state.items = remaining;
   await chrome.storage.local.set({ [STORAGE_KEY]: remaining });
+  await notifyCurrentTabItemsChanged();
   render();
   setStatus("已清空当前页面反馈。");
+}
+
+async function deleteFeedbackItem(itemId) {
+  const item = state.items.find((entry) => entry.id === itemId);
+  if (!item || item.pageUrl !== state.page.url) {
+    setStatus("没有找到要删除的反馈。", true);
+    return;
+  }
+
+  const confirmed = window.confirm("确定删除这条反馈吗？");
+  if (!confirmed) {
+    return;
+  }
+
+  state.items = state.items.filter((entry) => entry.id !== itemId);
+  await chrome.storage.local.set({ [STORAGE_KEY]: state.items });
+  await notifyCurrentTabItemsChanged();
+  render();
+  setStatus("已删除 1 条反馈。");
+}
+
+async function notifyCurrentTabItemsChanged() {
+  if (!state.tab?.id) {
+    return;
+  }
+
+  try {
+    await chrome.tabs.sendMessage(state.tab.id, { type: "FEEDBACK_ITEMS_CHANGED" });
+  } catch (_error) {
+    // The page overlay may not be active. Storage has already been updated.
+  }
 }
 
 async function loadItems() {
@@ -126,7 +159,7 @@ function render() {
   els.pageTitle.textContent = state.page.title || "未命名页面";
   els.pageUrl.textContent = state.page.url;
 
-  const items = getCurrentPageItems();
+  const items = getDisplayPageItems();
   els.currentCount.textContent = `共 ${items.length} 条`;
   els.exportPdfBtn.disabled = items.length === 0;
   els.clearCurrentBtn.disabled = items.length === 0;
@@ -176,7 +209,10 @@ function renderFeedbackList(items) {
 
       return `
         <article class="feedback-card">
-          <h3>${index + 1}. [${escapeHtml(item.category)}] ${typeText}反馈</h3>
+          <div class="feedback-card-head">
+            <h3>${index + 1}. [${escapeHtml(item.category)}] ${typeText}反馈</h3>
+            <button class="delete-feedback" type="button" data-delete-id="${escapeHtml(item.id)}" aria-label="删除第 ${index + 1} 条反馈">删除</button>
+          </div>
           <p>时间：${escapeHtml(formatTime(item.createdAt))}</p>
           ${quote}
           <p>内容：${escapeHtml(limitText(item.issue, 80))}</p>
@@ -190,6 +226,19 @@ function renderFeedbackList(items) {
 
 function getCurrentPageItems() {
   return state.items.filter((item) => item.pageUrl === state.page.url);
+}
+
+function getDisplayPageItems() {
+  return getCurrentPageItems().slice().reverse();
+}
+
+function onFeedbackListClick(event) {
+  const deleteButton = event.target.closest("[data-delete-id]");
+  if (!deleteButton) {
+    return;
+  }
+
+  deleteFeedbackItem(deleteButton.dataset.deleteId);
 }
 
 function ensureHttpLikePage() {

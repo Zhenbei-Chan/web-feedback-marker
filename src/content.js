@@ -33,6 +33,13 @@
       return true;
     }
 
+    if (message?.type === "FEEDBACK_ITEMS_CHANGED") {
+      syncPageItemsFromStorage()
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ error: error.message || "无法同步反馈列表。" }));
+      return true;
+    }
+
     return false;
   });
 
@@ -191,6 +198,7 @@
         hidePopover();
       }
     });
+    overlay.popover.addEventListener("click", onPopoverClick);
 
     window.addEventListener("scroll", renderAll, true);
     window.addEventListener("resize", renderAll);
@@ -549,9 +557,50 @@
     await chrome.storage.local.set({ [STORAGE_KEY]: [item, ...items] });
   }
 
+  async function deleteItem(itemId) {
+    const items = await loadItems();
+    const item = items.find((entry) => entry.id === itemId);
+    if (!item) {
+      showHint("没有找到要删除的反馈。", true, 4200);
+      return;
+    }
+
+    const confirmed = window.confirm("确定删除这条反馈吗？");
+    if (!confirmed) {
+      return;
+    }
+
+    const remaining = items.filter((item) => item.id !== itemId);
+    await chrome.storage.local.set({ [STORAGE_KEY]: remaining });
+    await syncPageItemsFromStorage();
+    showHint("已删除 1 条反馈。");
+  }
+
   async function loadItems() {
     const result = await chrome.storage.local.get(STORAGE_KEY);
     return Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
+  }
+
+  async function syncPageItemsFromStorage() {
+    if (!session) {
+      return;
+    }
+
+    const items = await loadItems();
+    session.pageItems = getCurrentPageItems(items, session.page.url).reverse();
+    const currentIds = new Set(session.pageItems.map((item) => item.id));
+    session.newItems = session.newItems.filter((item) => currentIds.has(item.id));
+
+    if (pinnedPopoverId && !currentIds.has(pinnedPopoverId)) {
+      pinnedPopoverId = "";
+      hidePopover();
+    }
+
+    if (highlightedItemId && !currentIds.has(highlightedItemId)) {
+      highlightedItemId = "";
+    }
+
+    renderAll();
   }
 
   function getCurrentPageItems(items, pageUrl) {
@@ -786,10 +835,20 @@
       <span>${escapeHtml(formatTime(item.createdAt))}</span>
       <p>${escapeHtml(item.issue || "")}</p>
       ${item.selectedText ? `<em>引用：${escapeHtml(limitText(item.selectedText, 80))}</em>` : ""}
+      <button class="popover-delete" type="button" data-delete-id="${escapeHtml(item.id)}">删除这条反馈</button>
     `;
     overlay.popover.style.left = `${clamp(point.x + 16, 12, window.innerWidth - 330)}px`;
     overlay.popover.style.top = `${clamp(point.y + 16, 70, window.innerHeight - 220)}px`;
     overlay.popover.classList.add("is-visible");
+  }
+
+  function onPopoverClick(event) {
+    const deleteButton = event.target.closest("[data-delete-id]");
+    if (!deleteButton) {
+      return;
+    }
+
+    deleteItem(deleteButton.dataset.deleteId);
   }
 
   function hidePopover() {
@@ -1398,6 +1457,24 @@
       .popover p {
         margin: 0;
         color: #344054;
+      }
+
+      .popover-delete {
+        width: fit-content;
+        min-height: 28px;
+        border: 0;
+        border-radius: 6px;
+        background: #fff4f3;
+        color: #b42318;
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 750;
+        padding: 0 9px;
+      }
+
+      .popover-delete:hover {
+        background: #fee4e2;
       }
 
       .hint {
