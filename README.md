@@ -137,6 +137,8 @@ PDF 文件名格式：
 └── LICENSE                    # MIT 许可证
 ```
 
+发布前回归测试见 [docs/TEST_CASES.md](docs/TEST_CASES.md)。
+
 ## 开发说明
 
 当前项目不需要构建步骤。修改文件后：

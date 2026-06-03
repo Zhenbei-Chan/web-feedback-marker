@@ -43,6 +43,8 @@
     return false;
   });
 
+  chrome.storage.onChanged.addListener(onStorageChanged);
+
   function getPageContext() {
     return {
       title: document.title || "",
@@ -601,6 +603,16 @@
     }
 
     renderAll();
+  }
+
+  function onStorageChanged(changes, areaName) {
+    if (areaName !== "local" || !changes[STORAGE_KEY] || !session) {
+      return;
+    }
+
+    syncPageItemsFromStorage().catch(() => {
+      showHint("反馈列表同步失败，请重新进入批注模式。", true, 4200);
+    });
   }
 
   function getCurrentPageItems(items, pageUrl) {
