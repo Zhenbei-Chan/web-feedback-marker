@@ -6,12 +6,16 @@
   window.__WEB_FEEDBACK_ASSISTANT_INSTALLED__ = true;
 
   const STORAGE_KEY = "webFeedbackAssistant.items";
+  const DOCK_POSITION_KEY = "webFeedbackAssistant.dockPosition";
   const CATEGORIES = ["内容错误", "表达不清", "结构问题", "链接问题", "视觉建议", "其他"];
   const MARK_COLOR = "#f04438";
   const DRAFT_COLOR = "#1769e0";
   const POINT_CAPTURE_WIDTH = 640;
   const POINT_CAPTURE_HEIGHT = 360;
   const REGION_PADDING = 72;
+  const DOCK_WIDTH = 238;
+  const DOCK_SIZE = 52;
+  const DOCK_MARGIN = 18;
 
   let overlay = null;
   let session = null;
@@ -19,6 +23,12 @@
   let highlightedItemId = "";
   let hintTimer = 0;
   let lastSelectionContext = { text: "", rect: null };
+  let dockState = {
+    side: "right",
+    top: null,
+    drag: null,
+    moved: false
+  };
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "GET_PAGE_CONTEXT") {
@@ -67,7 +77,13 @@
     }
 
     const page = getPageContext();
-    const items = await loadItems();
+    const [items, dockPosition] = await Promise.all([loadItems(), loadDockPosition()]);
+    dockState = {
+      ...dockState,
+      ...dockPosition,
+      drag: null,
+      moved: false
+    };
     session = {
       id: crypto.randomUUID(),
       page,
@@ -80,6 +96,7 @@
     };
 
     createOverlay();
+    applyDockPosition();
     renderAll();
     showHint("批注助手已在右下角待命。");
   }
@@ -180,7 +197,11 @@
   }
 
   function bindOverlayEvents() {
-    overlay.launcherBtn.addEventListener("click", () => toggleMenu());
+    overlay.launcherBtn.addEventListener("pointerdown", onDockPointerDown);
+    overlay.launcherBtn.addEventListener("pointermove", onDockPointerMove);
+    overlay.launcherBtn.addEventListener("pointerup", onDockPointerUp);
+    overlay.launcherBtn.addEventListener("pointercancel", onDockPointerCancel);
+    overlay.launcherBtn.addEventListener("click", onLauncherClick);
     overlay.dockActions.forEach((button) => {
       button.addEventListener("click", () => handleDockAction(button.dataset.action));
     });
@@ -315,6 +336,89 @@
   function toggleMenu(forceOpen = null) {
     const shouldOpen = forceOpen === null ? overlay.root.dataset.menu !== "open" : forceOpen;
     overlay.root.dataset.menu = shouldOpen ? "open" : "closed";
+    applyDockPosition();
+  }
+
+  function onLauncherClick(event) {
+    if (dockState.moved) {
+      event.preventDefault();
+      event.stopPropagation();
+      dockState.moved = false;
+      return;
+    }
+
+    toggleMenu();
+  }
+
+  function onDockPointerDown(event) {
+    if (event.button !== undefined && event.button !== 0) {
+      return;
+    }
+
+    const rect = overlay.quickEntry.getBoundingClientRect();
+    dockState.drag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      startX: event.clientX,
+      startY: event.clientY
+    };
+    dockState.moved = false;
+    overlay.root.dataset.dockDragging = "true";
+    overlay.launcherBtn.setPointerCapture(event.pointerId);
+  }
+
+  function onDockPointerMove(event) {
+    if (!dockState.drag || dockState.drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = Math.abs(event.clientX - dockState.drag.startX);
+    const deltaY = Math.abs(event.clientY - dockState.drag.startY);
+    if (deltaX < 4 && deltaY < 4 && !dockState.moved) {
+      return;
+    }
+
+    dockState.moved = true;
+    toggleMenu(false);
+
+    const entryWidth = getDockEntryWidth();
+    const left = clamp(event.clientX - dockState.drag.offsetX, DOCK_MARGIN, window.innerWidth - entryWidth - DOCK_MARGIN);
+    const top = clamp(event.clientY - dockState.drag.offsetY, DOCK_MARGIN, window.innerHeight - DOCK_SIZE - DOCK_MARGIN);
+
+    overlay.quickEntry.style.width = `${entryWidth}px`;
+    overlay.quickEntry.style.left = `${left}px`;
+    overlay.quickEntry.style.top = `${top}px`;
+  }
+
+  function onDockPointerUp(event) {
+    if (!dockState.drag || dockState.drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const rect = overlay.quickEntry.getBoundingClientRect();
+    dockState.side = rect.left + rect.width / 2 < window.innerWidth / 2 ? "left" : "right";
+    dockState.top = clamp(rect.top, DOCK_MARGIN, window.innerHeight - DOCK_SIZE - DOCK_MARGIN);
+    dockState.drag = null;
+    overlay.root.dataset.dockDragging = "false";
+
+    if (overlay.launcherBtn.hasPointerCapture(event.pointerId)) {
+      overlay.launcherBtn.releasePointerCapture(event.pointerId);
+    }
+
+    applyDockPosition();
+    saveDockPosition();
+  }
+
+  function onDockPointerCancel(event) {
+    if (!dockState.drag || dockState.drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    dockState.drag = null;
+    dockState.moved = false;
+    overlay.root.dataset.dockDragging = "false";
+    applyDockPosition();
   }
 
   function onPointerDown(event) {
@@ -583,6 +687,20 @@
     return Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
   }
 
+  async function loadDockPosition() {
+    const result = await chrome.storage.local.get(DOCK_POSITION_KEY);
+    return normalizeDockPosition(result[DOCK_POSITION_KEY]);
+  }
+
+  function saveDockPosition() {
+    chrome.storage.local.set({
+      [DOCK_POSITION_KEY]: {
+        side: dockState.side,
+        top: dockState.top
+      }
+    });
+  }
+
   async function syncPageItemsFromStorage() {
     if (!session) {
       return;
@@ -625,6 +743,7 @@
     }
 
     resizeCanvas();
+    applyDockPosition();
     renderCanvas();
     renderMarkers();
     positionComposer();
@@ -886,6 +1005,41 @@
   function updateLauncherCount() {
     overlay.countBadge.textContent = String(session.pageItems.length);
     overlay.countBadge.classList.toggle("is-empty", session.pageItems.length === 0);
+  }
+
+  function applyDockPosition() {
+    if (!overlay) {
+      return;
+    }
+
+    const entryWidth = getDockEntryWidth();
+    dockState = {
+      ...dockState,
+      ...normalizeDockPosition(dockState)
+    };
+
+    const left = dockState.side === "left"
+      ? DOCK_MARGIN
+      : window.innerWidth - entryWidth - DOCK_MARGIN;
+
+    overlay.root.dataset.dockSide = dockState.side;
+    overlay.quickEntry.style.width = `${entryWidth}px`;
+    overlay.quickEntry.style.left = `${left}px`;
+    overlay.quickEntry.style.top = `${dockState.top}px`;
+  }
+
+  function normalizeDockPosition(value) {
+    const side = value?.side === "left" ? "left" : "right";
+    const topFallback = window.innerHeight - DOCK_SIZE - DOCK_MARGIN;
+    const topValue = Number.isFinite(value?.top) ? value.top : topFallback;
+    return {
+      side,
+      top: clamp(topValue, DOCK_MARGIN, Math.max(DOCK_MARGIN, window.innerHeight - DOCK_SIZE - DOCK_MARGIN))
+    };
+  }
+
+  function getDockEntryWidth() {
+    return Math.min(DOCK_WIDTH, Math.max(DOCK_SIZE, window.innerWidth - DOCK_MARGIN * 2));
   }
 
   function positionComposer() {
@@ -1170,12 +1324,35 @@
 
       .quick-entry {
         position: fixed;
-        right: 18px;
-        bottom: 18px;
         display: grid;
-        justify-items: end;
         gap: 10px;
+        transition: transform 160ms ease, opacity 160ms ease;
         pointer-events: none;
+      }
+
+      .shell[data-dock-side="left"] .quick-entry {
+        justify-items: start;
+      }
+
+      .shell[data-dock-side="right"] .quick-entry {
+        justify-items: end;
+      }
+
+      .shell[data-menu="closed"][data-dock-side="left"] .quick-entry:not(:hover) {
+        opacity: 0.72;
+        transform: translateX(-34px);
+      }
+
+      .shell[data-menu="closed"][data-dock-side="right"] .quick-entry:not(:hover) {
+        opacity: 0.72;
+        transform: translateX(34px);
+      }
+
+      .shell[data-menu="open"] .quick-entry,
+      .shell[data-dock-dragging="true"] .quick-entry,
+      .quick-entry:hover {
+        opacity: 1;
+        transform: translateX(0);
       }
 
       .shell[data-tool="region"] .quick-entry,
@@ -1206,6 +1383,7 @@
         padding: 0;
         pointer-events: auto;
         box-shadow: 0 14px 34px rgba(15, 23, 42, 0.24);
+        touch-action: none;
       }
 
       .launcher-icon {
@@ -1521,11 +1699,6 @@
       }
 
       @media (max-width: 760px) {
-        .quick-entry {
-          right: 10px;
-          bottom: 10px;
-        }
-
         .dock {
           width: min(238px, calc(100vw - 20px));
         }

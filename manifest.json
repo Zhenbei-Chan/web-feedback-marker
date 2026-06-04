@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "网页反馈标注器",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "通过低打扰悬浮球在网页上标注反馈，并导出包含图文的 PDF 反馈清单。",
   "icons": {
     "16": "assets/icons/icon-16.png",
