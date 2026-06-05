@@ -16,6 +16,9 @@
   const DOCK_WIDTH = 238;
   const DOCK_SIZE = 52;
   const DOCK_MARGIN = 18;
+  const DOCK_AVOID_GAP = 12;
+  const DOCK_MENU_HEIGHT = 310;
+  const DOCK_OBSTACLE_SCAN_TTL = 800;
 
   let overlay = null;
   let session = null;
@@ -28,6 +31,10 @@
     top: null,
     drag: null,
     moved: false
+  };
+  let floatingObstacleCache = {
+    at: 0,
+    rects: []
   };
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -759,6 +766,7 @@
       overlay.canvas.height = Math.round(height * dpr);
       overlay.canvas.style.width = `${width}px`;
       overlay.canvas.style.height = `${height}px`;
+      floatingObstacleCache.at = 0;
     }
     overlay.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
@@ -1008,7 +1016,7 @@
   }
 
   function applyDockPosition() {
-    if (!overlay) {
+    if (!overlay || dockState.drag) {
       return;
     }
 
@@ -1021,11 +1029,12 @@
     const left = dockState.side === "left"
       ? DOCK_MARGIN
       : window.innerWidth - entryWidth - DOCK_MARGIN;
+    const visualTop = getAvoidedDockTop(dockState.side, dockState.top);
 
     overlay.root.dataset.dockSide = dockState.side;
     overlay.quickEntry.style.width = `${entryWidth}px`;
     overlay.quickEntry.style.left = `${left}px`;
-    overlay.quickEntry.style.top = `${dockState.top}px`;
+    overlay.quickEntry.style.top = `${visualTop}px`;
   }
 
   function normalizeDockPosition(value) {
@@ -1040,6 +1049,113 @@
 
   function getDockEntryWidth() {
     return Math.min(DOCK_WIDTH, Math.max(DOCK_SIZE, window.innerWidth - DOCK_MARGIN * 2));
+  }
+
+  function getAvoidedDockTop(side, preferredTop) {
+    const maxTop = Math.max(DOCK_MARGIN, window.innerHeight - DOCK_SIZE - DOCK_MARGIN);
+    const menuOpen = overlay?.root.dataset.menu === "open";
+    const menuSafeTop = DOCK_MENU_HEIGHT + DOCK_AVOID_GAP + DOCK_MARGIN;
+    const minTop = menuOpen ? Math.min(menuSafeTop, maxTop) : DOCK_MARGIN;
+    const baseTop = clamp(preferredTop, minTop, maxTop);
+    const launcherLeft = side === "left"
+      ? DOCK_MARGIN
+      : window.innerWidth - DOCK_MARGIN - DOCK_SIZE;
+    const launcherRight = launcherLeft + DOCK_SIZE;
+    const obstacles = getFloatingObstacles().filter((rect) =>
+      rect.width <= window.innerWidth * 0.66 &&
+      rect.height <= window.innerHeight * 0.9 &&
+      rect.right > launcherLeft - DOCK_AVOID_GAP &&
+      rect.left < launcherRight + DOCK_AVOID_GAP
+    );
+
+    if (!obstacles.length || !hasDockCollision(baseTop, obstacles)) {
+      return baseTop;
+    }
+
+    const candidates = [baseTop];
+    obstacles.forEach((rect) => {
+      candidates.push(rect.top - DOCK_SIZE - DOCK_AVOID_GAP);
+      candidates.push(rect.bottom + DOCK_AVOID_GAP);
+    });
+
+    const available = candidates
+      .map((top) => clamp(top, minTop, maxTop))
+      .filter((top, index, values) => values.indexOf(top) === index)
+      .filter((top) => !hasDockCollision(top, obstacles))
+      .sort((a, b) => Math.abs(a - baseTop) - Math.abs(b - baseTop));
+
+    if (available.length) {
+      return available[0];
+    }
+
+    for (let distance = 8; distance <= maxTop - minTop; distance += 8) {
+      const down = clamp(baseTop + distance, minTop, maxTop);
+      if (!hasDockCollision(down, obstacles)) {
+        return down;
+      }
+
+      const up = clamp(baseTop - distance, minTop, maxTop);
+      if (!hasDockCollision(up, obstacles)) {
+        return up;
+      }
+    }
+
+    return baseTop;
+  }
+
+  function hasDockCollision(top, obstacles) {
+    const dockTop = top - DOCK_AVOID_GAP;
+    const dockBottom = top + DOCK_SIZE + DOCK_AVOID_GAP;
+    return obstacles.some((rect) => rect.bottom > dockTop && rect.top < dockBottom);
+  }
+
+  function getFloatingObstacles() {
+    const now = Date.now();
+    if (now - floatingObstacleCache.at < DOCK_OBSTACLE_SCAN_TTL) {
+      return floatingObstacleCache.rects;
+    }
+
+    const elements = Array.from(document.body?.querySelectorAll("*") || []);
+    const rects = [];
+
+    for (const element of elements) {
+      if (!(element instanceof HTMLElement) || element === overlay?.host) {
+        continue;
+      }
+
+      const style = window.getComputedStyle(element);
+      if (style.position !== "fixed" && style.position !== "sticky") {
+        continue;
+      }
+
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0 || style.pointerEvents === "none") {
+        continue;
+      }
+
+      const rect = element.getBoundingClientRect();
+      if (
+        rect.width < 28 ||
+        rect.height < 28 ||
+        rect.right <= 0 ||
+        rect.bottom <= 0 ||
+        rect.left >= window.innerWidth ||
+        rect.top >= window.innerHeight
+      ) {
+        continue;
+      }
+
+      rects.push({
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height
+      });
+    }
+
+    floatingObstacleCache = { at: now, rects };
+    return rects;
   }
 
   function positionComposer() {
@@ -1326,6 +1442,7 @@
         position: fixed;
         display: grid;
         gap: 10px;
+        min-height: 52px;
         transition: transform 160ms ease, opacity 160ms ease;
         pointer-events: none;
       }
@@ -1422,6 +1539,8 @@
       }
 
       .dock {
+        position: absolute;
+        bottom: 62px;
         display: none;
         width: 238px;
         gap: 7px;
@@ -1431,6 +1550,14 @@
         background: rgba(255, 255, 255, 0.97);
         box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
         pointer-events: auto;
+      }
+
+      .shell[data-dock-side="left"] .dock {
+        left: 0;
+      }
+
+      .shell[data-dock-side="right"] .dock {
+        right: 0;
       }
 
       .shell[data-menu="open"] .dock {
