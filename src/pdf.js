@@ -20,18 +20,20 @@
     panelStrong: "#f2f4f7",
     primary: "#1769e0",
     primaryDark: "#0f55b8",
-    primarySoft: "#eef4ff"
+    primarySoft: "#eef4ff",
+    quoteLine: "#bcd2ff"
   };
 
   async function exportFeedbackPdf({ title, url, items }) {
     const exportedAt = new Date();
-    const reportTitle = buildReportTitle(title || "未命名页面", exportedAt);
-    const pages = await renderReportPages({ title: reportTitle, url, items, exportedAt });
+    const pageTitle = title || "未命名页面";
+    const reportTitle = buildReportTitle(pageTitle, exportedAt);
+    const pages = await renderReportPages({ pageTitle, url, items, exportedAt });
     const blob = buildImagePdf(pages);
     downloadBlob(blob, `${sanitizeFileName(reportTitle)}.pdf`);
   }
 
-  async function renderReportPages({ title, url, items, exportedAt }) {
+  async function renderReportPages({ pageTitle, url, items, exportedAt }) {
     const pages = [];
     let canvas = createPage();
     let ctx = canvas.getContext("2d");
@@ -56,7 +58,7 @@
     };
 
     y = drawReportHeader(ctx, {
-      title: title || "网页反馈",
+      pageTitle: pageTitle || "未命名页面",
       url: url || "",
       exportedAt,
       count: items.length
@@ -98,8 +100,6 @@
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
-    ctx.fillStyle = "#fbfcff";
-    ctx.fillRect(0, 0, PAGE_WIDTH, 16);
     return canvas;
   }
 
@@ -107,47 +107,50 @@
     ctx.font = `${weight} ${size}px ${FONT_FAMILY}`;
   }
 
-  function drawReportHeader(ctx, { title, url, exportedAt, count }) {
+  function drawReportHeader(ctx, { pageTitle, url, exportedAt, count }) {
     let y = MARGIN;
 
+    drawRule(ctx, y - 34);
+    ctx.fillStyle = COLORS.text;
+    setFont(ctx, 850, 42);
+    ctx.fillText("网页反馈标注报告", MARGIN, y + 18);
+
+    ctx.textAlign = "right";
+    ctx.fillStyle = COLORS.faint;
+    setFont(ctx, 600, 20);
+    ctx.fillText("Web Feedback Marker", PAGE_WIDTH - MARGIN, y + 6);
+    setFont(ctx, 400, 19);
+    ctx.fillText(formatTime(exportedAt), PAGE_WIDTH - MARGIN, y + 36);
+    ctx.textAlign = "left";
+
+    y += 70;
+
     ctx.fillStyle = COLORS.primaryDark;
-    setFont(ctx, 800, 22);
-    ctx.fillText("反馈标注报告", MARGIN + 22, y + 28);
-
-    ctx.fillStyle = COLORS.text;
-    setFont(ctx, 800, 42);
-    const titleLines = wrapText(ctx, title, CONTENT_WIDTH, 2);
-    titleLines.forEach((line, index) => {
-      ctx.fillText(line, MARGIN, y + 96 + index * 52);
-    });
-
-    y += 150 + (titleLines.length - 1) * 52;
-
-    ctx.fillStyle = COLORS.text;
-    setFont(ctx, 800, 28);
+    setFont(ctx, 800, 26);
     ctx.fillText(`共 ${count} 条反馈`, MARGIN, y);
 
+    const sourceX = MARGIN + 180;
     ctx.fillStyle = COLORS.muted;
     setFont(ctx, 500, 22);
-    ctx.fillText(`导出时间：${formatTime(exportedAt)}`, MARGIN + 190, y);
+    const titleLines = wrapText(ctx, pageTitle || "未命名页面", CONTENT_WIDTH - 180, 1);
+    ctx.fillText(titleLines[0] || "未命名页面", sourceX, y);
 
-    y += 48;
+    y += 36;
     ctx.fillStyle = COLORS.muted;
-    setFont(ctx, 400, 22);
-    wrapText(ctx, url || "-", CONTENT_WIDTH, 2).forEach((line, index) => {
-      ctx.fillText(line, MARGIN, y + index * 32);
-    });
+    setFont(ctx, 400, 20);
+    const urlLines = wrapText(ctx, url || "-", CONTENT_WIDTH, 1);
+    ctx.fillText(urlLines[0] || "-", MARGIN, y);
 
-    y += 34 + Math.max(0, wrapText(ctx, url || "-", CONTENT_WIDTH, 2).length - 1) * 32;
+    y += 52;
     drawRule(ctx, y);
-    return y + 42;
+    return y + 46;
   }
 
   function drawFeedbackFlowHeader(ctx, item, number, y) {
     drawRule(ctx, y);
     y += 34;
 
-    const badgeSize = 42;
+    const badgeSize = 44;
     const badgeX = MARGIN + badgeSize / 2;
     const badgeY = y + 18;
     ctx.fillStyle = COLORS.primary;
@@ -162,73 +165,74 @@
 
     const headingX = MARGIN + badgeSize + 22;
     ctx.fillStyle = COLORS.text;
-    setFont(ctx, 800, 29);
+    setFont(ctx, 850, 31);
     ctx.fillText(`标注点 ${number}`, headingX, y + 16);
 
     ctx.fillStyle = COLORS.muted;
-    setFont(ctx, 500, 21);
+    setFont(ctx, 500, 22);
     ctx.fillText(`${item.category || "其他"} · ${getItemTypeLabel(item)} · ${formatTime(item.createdAt)}`, headingX, y + 50);
-    return y + 78;
+    return y + 76;
   }
 
   function drawFeedbackText(ctx, text, y) {
-    setFont(ctx, 650, 28);
+    setFont(ctx, 850, 30);
     const lines = wrapText(ctx, text || "未填写反馈内容", CONTENT_WIDTH, 10);
     ctx.fillStyle = COLORS.text;
-    const lineHeight = 42;
+    const lineHeight = 44;
     lines.forEach((line, index) => {
       ctx.fillText(line, MARGIN, y + index * lineHeight);
     });
 
-    return y + lines.length * lineHeight + 22;
+    return y + lines.length * lineHeight + 44;
   }
 
   function getFeedbackTextHeight(ctx, text) {
-    setFont(ctx, 650, 28);
+    setFont(ctx, 850, 30);
     const lines = wrapText(ctx, text || "未填写反馈内容", CONTENT_WIDTH, 10);
-    return lines.length * 42 + 22;
+    return lines.length * 44 + 44;
   }
 
   function drawQuote(ctx, text, y) {
-    setFont(ctx, 400, 24);
-    const lines = wrapText(ctx, text, CONTENT_WIDTH - 46, 5);
+    setFont(ctx, 400, 26);
+    const quoteX = MARGIN + 28;
+    const lines = wrapText(ctx, text, CONTENT_WIDTH - 76, 6);
 
-    ctx.strokeStyle = "#b2ccff";
+    ctx.strokeStyle = COLORS.quoteLine;
     ctx.lineWidth = 6;
     ctx.beginPath();
-    ctx.moveTo(MARGIN + 2, y + 8);
-    ctx.lineTo(MARGIN + 2, y + 48 + lines.length * 34);
+    ctx.moveTo(MARGIN + 4, y);
+    ctx.lineTo(MARGIN + 4, y + 56 + lines.length * 38);
     ctx.stroke();
 
     ctx.fillStyle = COLORS.muted;
-    setFont(ctx, 700, 20);
-    ctx.fillText("引用", MARGIN + 22, y + 28);
+    setFont(ctx, 800, 22);
+    ctx.fillText("引用", quoteX, y + 25);
 
     ctx.fillStyle = "#475467";
-    setFont(ctx, 400, 23);
+    setFont(ctx, 400, 25);
     lines.forEach((line, index) => {
-      ctx.fillText(line, MARGIN + 22, y + 66 + index * 34);
+      ctx.fillText(line, quoteX, y + 68 + index * 38);
     });
 
-    return y + 76 + lines.length * 34;
+    return y + 86 + lines.length * 38;
   }
 
   function getQuoteHeight(ctx, text) {
-    setFont(ctx, 400, 24);
-    const lines = wrapText(ctx, text, CONTENT_WIDTH - 46, 5);
-    return 76 + lines.length * 34;
+    setFont(ctx, 400, 26);
+    const lines = wrapText(ctx, text, CONTENT_WIDTH - 76, 6);
+    return 86 + lines.length * 38;
   }
 
   function drawEvidenceTitle(ctx, y) {
     ctx.fillStyle = COLORS.muted;
-    setFont(ctx, 600, 20);
-    ctx.fillText("截图证据", MARGIN, y + 22);
-    return y + 38;
+    setFont(ctx, 800, 21);
+    ctx.fillText("截图证据", MARGIN, y + 20);
+    return y + 44;
   }
 
   function drawRule(ctx, y) {
-    ctx.strokeStyle = COLORS.line;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = COLORS.border;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(MARGIN, y);
     ctx.lineTo(PAGE_WIDTH - MARGIN, y);
@@ -244,7 +248,7 @@
     ctx.drawImage(image, x, y, size.width, size.height);
     ctx.restore();
     ctx.strokeStyle = COLORS.line;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.25;
     roundRect(ctx, x, y, size.width, size.height, 12);
     ctx.stroke();
   }
