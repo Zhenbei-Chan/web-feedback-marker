@@ -64,15 +64,12 @@
 
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
-      ensureSpace(300);
+      const textHeight = getFeedbackTextHeight(ctx, item.issue || "");
+      const quoteHeight = item.selectedText ? getQuoteHeight(ctx, item.selectedText) : 0;
+      ensureSpace(78 + textHeight + quoteHeight + 42);
 
-      y = drawFeedbackCardHeader(ctx, item, index + 1, y);
-
-      y = drawInfoRow(ctx, [
-        { label: "反馈时间", value: formatTime(item.createdAt) },
-        { label: "反馈位置", value: getReportLocationText(item) }
-      ], y);
-      y = drawContentBlock(ctx, "反馈内容", item.issue || "", y);
+      y = drawFeedbackFlowHeader(ctx, item, index + 1, y);
+      y = drawFeedbackText(ctx, item.issue || "", y);
 
       if (item.selectedText) {
         y = drawQuote(ctx, item.selectedText, y);
@@ -80,14 +77,14 @@
 
       if (item.imageDataUrl) {
         const image = await loadImage(item.imageDataUrl);
-        const imageSize = getFittedImageSize(image, CONTENT_WIDTH - 36, 700);
-        ensureSpace(imageSize.height + 94);
+        const imageSize = getFittedImageSize(image, CONTENT_WIDTH, 700);
+        ensureSpace(imageSize.height + 78);
         y = drawEvidenceTitle(ctx, y);
-        drawImageFrame(ctx, image, y, imageSize);
-        y += imageSize.height + 42;
+        drawImageEvidence(ctx, image, y, imageSize);
+        y += imageSize.height + 36;
       }
 
-      y += 10;
+      y += 18;
     }
 
     finishPage();
@@ -113,11 +110,8 @@
   function drawReportHeader(ctx, { title, url, exportedAt, count }) {
     let y = MARGIN;
 
-    ctx.fillStyle = COLORS.primary;
-    roundRect(ctx, MARGIN, y, 190, 42, 21);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    setFont(ctx, 800, 21);
+    ctx.fillStyle = COLORS.primaryDark;
+    setFont(ctx, 800, 22);
     ctx.fillText("反馈标注报告", MARGIN + 22, y + 28);
 
     ctx.fillStyle = COLORS.text;
@@ -127,167 +121,109 @@
       ctx.fillText(line, MARGIN, y + 96 + index * 52);
     });
 
-    y += 142 + (titleLines.length - 1) * 52;
-    y = drawHeaderMeta(ctx, url, exportedAt, count, y);
-    return y + 34;
-  }
+    y += 150 + (titleLines.length - 1) * 52;
 
-  function drawHeaderMeta(ctx, url, exportedAt, count, y) {
-    const gap = 14;
-    const cardHeight = 82;
-    const cardWidth = Math.floor((CONTENT_WIDTH - gap * 2) / 3);
-    drawMetaCard(ctx, "反馈数量", `${count} 条`, MARGIN, y, cardWidth, cardHeight, true);
-    drawMetaCard(ctx, "导出时间", formatTime(exportedAt), MARGIN + cardWidth + gap, y, cardWidth, cardHeight);
-    drawMetaCard(ctx, "报告类型", "网页反馈标注", MARGIN + (cardWidth + gap) * 2, y, cardWidth, cardHeight);
-
-    y += cardHeight + 16;
-    drawMetaCard(ctx, "页面来源", url || "-", MARGIN, y, CONTENT_WIDTH, cardHeight);
-    return y + cardHeight + 26;
-  }
-
-  function drawMetaCard(ctx, label, value, x, y, width, height, emphasize = false) {
-    ctx.fillStyle = emphasize ? COLORS.primarySoft : COLORS.panel;
-    roundRect(ctx, x, y, width, height, 14);
-    ctx.fill();
-    ctx.strokeStyle = emphasize ? "#bfd7ff" : COLORS.border;
-    ctx.lineWidth = 2;
-    roundRect(ctx, x, y, width, height, 14);
-    ctx.stroke();
+    ctx.fillStyle = COLORS.text;
+    setFont(ctx, 800, 28);
+    ctx.fillText(`共 ${count} 条反馈`, MARGIN, y);
 
     ctx.fillStyle = COLORS.muted;
-    setFont(ctx, 700, 20);
-    ctx.fillText(label, x + 22, y + 28);
+    setFont(ctx, 500, 22);
+    ctx.fillText(`导出时间：${formatTime(exportedAt)}`, MARGIN + 190, y);
 
-    ctx.fillStyle = emphasize ? COLORS.primaryDark : COLORS.text;
-    setFont(ctx, emphasize ? 800 : 550, 24);
-    const valueLines = wrapText(ctx, value, width - 44, 1);
-    ctx.fillText(valueLines[0] || "-", x + 22, y + 58);
+    y += 48;
+    ctx.fillStyle = COLORS.muted;
+    setFont(ctx, 400, 22);
+    wrapText(ctx, url || "-", CONTENT_WIDTH, 2).forEach((line, index) => {
+      ctx.fillText(line, MARGIN, y + index * 32);
+    });
+
+    y += 34 + Math.max(0, wrapText(ctx, url || "-", CONTENT_WIDTH, 2).length - 1) * 32;
+    drawRule(ctx, y);
+    return y + 42;
   }
 
-  function drawFeedbackCardHeader(ctx, item, number, y) {
-    const headerHeight = 96;
-    ctx.fillStyle = "#ffffff";
-    roundRect(ctx, MARGIN, y, CONTENT_WIDTH, headerHeight, 18);
-    ctx.fill();
-    ctx.strokeStyle = COLORS.border;
-    ctx.lineWidth = 2;
-    roundRect(ctx, MARGIN, y, CONTENT_WIDTH, headerHeight, 18);
-    ctx.stroke();
+  function drawFeedbackFlowHeader(ctx, item, number, y) {
+    drawRule(ctx, y);
+    y += 34;
 
-    const badgeSize = 46;
+    const badgeSize = 42;
+    const badgeX = MARGIN + badgeSize / 2;
+    const badgeY = y + 18;
     ctx.fillStyle = COLORS.primary;
-    roundRect(ctx, MARGIN + 22, y + 24, badgeSize, badgeSize, 13);
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, badgeSize / 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#ffffff";
-    setFont(ctx, 800, 22);
+    setFont(ctx, 800, 21);
     ctx.textAlign = "center";
-    ctx.fillText(String(number), MARGIN + 22 + badgeSize / 2, y + 55);
+    ctx.fillText(String(number), badgeX, badgeY + 8);
     ctx.textAlign = "left";
 
-    const headingX = MARGIN + 22 + badgeSize + 22;
+    const headingX = MARGIN + badgeSize + 22;
     ctx.fillStyle = COLORS.text;
-    setFont(ctx, 700, 30);
-    wrapText(ctx, getItemTypeLabel(item), CONTENT_WIDTH - badgeSize - 18, 1).forEach((line, index) => {
-      ctx.fillText(line, headingX, y + 42 + index * 38);
-    });
-
-    drawChip(ctx, item.category || "其他", headingX, y + 54);
-    return y + headerHeight + 20;
-  }
-
-  function drawChip(ctx, text, x, y) {
-    setFont(ctx, 700, 20);
-    const width = Math.min(210, Math.max(96, Math.ceil(ctx.measureText(text).width) + 34));
-    ctx.fillStyle = COLORS.primarySoft;
-    roundRect(ctx, x, y, width, 34, 17);
-    ctx.fill();
-    ctx.fillStyle = "#175cd3";
-    ctx.fillText(text, x + 17, y + 24);
-  }
-
-  function drawInfoRow(ctx, items, y) {
-    const gap = 14;
-    const width = Math.floor((CONTENT_WIDTH - gap) / 2);
-    const height = 76;
-
-    items.forEach((item, index) => {
-      const x = MARGIN + index * (width + gap);
-      ctx.fillStyle = COLORS.panel;
-      roundRect(ctx, x, y, width, height, 12);
-      ctx.fill();
-      ctx.strokeStyle = COLORS.border;
-      ctx.lineWidth = 2;
-      roundRect(ctx, x, y, width, height, 12);
-      ctx.stroke();
-
-      ctx.fillStyle = COLORS.muted;
-      setFont(ctx, 700, 18);
-      ctx.fillText(item.label, x + 18, y + 27);
-
-      ctx.fillStyle = COLORS.text;
-      setFont(ctx, 500, 21);
-      const valueLines = wrapText(ctx, item.value || "-", width - 36, 1);
-      ctx.fillText(valueLines[0] || "-", x + 18, y + 57);
-    });
-
-    return y + height + 18;
-  }
-
-  function drawContentBlock(ctx, label, text, y) {
-    const size = 25;
-    const lineHeight = 38;
-    setFont(ctx, 400, size);
-    const lines = wrapText(ctx, text || "-", CONTENT_WIDTH - 44, 10);
-    const height = lines.length * lineHeight + 78;
-
-    ctx.fillStyle = "#ffffff";
-    roundRect(ctx, MARGIN, y, CONTENT_WIDTH, height, 16);
-    ctx.fill();
-    ctx.strokeStyle = COLORS.border;
-    ctx.lineWidth = 2;
-    roundRect(ctx, MARGIN, y, CONTENT_WIDTH, height, 16);
-    ctx.stroke();
+    setFont(ctx, 800, 29);
+    ctx.fillText(`标注点 ${number}`, headingX, y + 16);
 
     ctx.fillStyle = COLORS.muted;
-    setFont(ctx, 700, size);
-    ctx.fillText(label, MARGIN + 22, y + 36);
+    setFont(ctx, 500, 21);
+    ctx.fillText(`${item.category || "其他"} · ${getItemTypeLabel(item)} · ${formatTime(item.createdAt)}`, headingX, y + 50);
+    return y + 78;
+  }
 
-    setFont(ctx, 400, size);
+  function drawFeedbackText(ctx, text, y) {
+    setFont(ctx, 650, 28);
+    const lines = wrapText(ctx, text || "未填写反馈内容", CONTENT_WIDTH, 10);
     ctx.fillStyle = COLORS.text;
+    const lineHeight = 42;
     lines.forEach((line, index) => {
-      ctx.fillText(line, MARGIN + 22, y + 76 + index * lineHeight);
+      ctx.fillText(line, MARGIN, y + index * lineHeight);
     });
 
-    return y + height + 18;
+    return y + lines.length * lineHeight + 22;
+  }
+
+  function getFeedbackTextHeight(ctx, text) {
+    setFont(ctx, 650, 28);
+    const lines = wrapText(ctx, text || "未填写反馈内容", CONTENT_WIDTH, 10);
+    return lines.length * 42 + 22;
   }
 
   function drawQuote(ctx, text, y) {
     setFont(ctx, 400, 24);
-    const lines = wrapText(ctx, text, CONTENT_WIDTH - 68, 6);
-    const height = lines.length * 36 + 76;
+    const lines = wrapText(ctx, text, CONTENT_WIDTH - 46, 5);
 
-    ctx.fillStyle = COLORS.panelStrong;
-    roundRect(ctx, MARGIN, y + 10, CONTENT_WIDTH, height, 14);
-    ctx.fill();
+    ctx.strokeStyle = "#b2ccff";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(MARGIN + 2, y + 8);
+    ctx.lineTo(MARGIN + 2, y + 48 + lines.length * 34);
+    ctx.stroke();
 
     ctx.fillStyle = COLORS.muted;
-    setFont(ctx, 700, 22);
-    ctx.fillText("引用文本", MARGIN + 24, y + 44);
+    setFont(ctx, 700, 20);
+    ctx.fillText("引用", MARGIN + 22, y + 28);
 
     ctx.fillStyle = "#475467";
-    setFont(ctx, 400, 24);
+    setFont(ctx, 400, 23);
     lines.forEach((line, index) => {
-      ctx.fillText(line, MARGIN + 24, y + 82 + index * 36);
+      ctx.fillText(line, MARGIN + 22, y + 66 + index * 34);
     });
 
-    return y + height + 30;
+    return y + 76 + lines.length * 34;
+  }
+
+  function getQuoteHeight(ctx, text) {
+    setFont(ctx, 400, 24);
+    const lines = wrapText(ctx, text, CONTENT_WIDTH - 46, 5);
+    return 76 + lines.length * 34;
   }
 
   function drawEvidenceTitle(ctx, y) {
     ctx.fillStyle = COLORS.muted;
-    setFont(ctx, 700, 22);
-    ctx.fillText("证据截图", MARGIN, y + 26);
-    return y + 44;
+    setFont(ctx, 600, 20);
+    ctx.fillText("截图证据", MARGIN, y + 22);
+    return y + 38;
   }
 
   function drawRule(ctx, y) {
@@ -299,20 +235,17 @@
     ctx.stroke();
   }
 
-  function drawImageFrame(ctx, image, y, size) {
+  function drawImageEvidence(ctx, image, y, size) {
     const x = MARGIN + (CONTENT_WIDTH - size.width) / 2;
 
-    ctx.fillStyle = COLORS.panel;
-    roundRect(ctx, x, y, size.width, size.height, 16);
-    ctx.fill();
     ctx.save();
-    roundRect(ctx, x, y, size.width, size.height, 16);
+    roundRect(ctx, x, y, size.width, size.height, 12);
     ctx.clip();
     ctx.drawImage(image, x, y, size.width, size.height);
     ctx.restore();
     ctx.strokeStyle = COLORS.line;
-    ctx.lineWidth = 2;
-    roundRect(ctx, x, y, size.width, size.height, 16);
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, x, y, size.width, size.height, 12);
     ctx.stroke();
   }
 
@@ -348,35 +281,15 @@
 
   function getItemTypeLabel(item) {
     if (item.type === "text") {
-      return "文本反馈";
+      return "文本";
     }
     if (item.type === "region") {
-      return "区域反馈";
+      return "区域";
     }
     if (item.type === "point") {
-      return "标记点反馈";
+      return "标记点";
     }
-    return "截图反馈";
-  }
-
-  function getFallbackLocationText(item) {
-    return getReportLocationText(item);
-  }
-
-  function getReportLocationText(item) {
-    if (item.type === "text" || item.selectedText) {
-      return "文本引用附近，已附周边截图";
-    }
-
-    if (item.shape?.type === "region" || item.type === "region") {
-      return item.snapshotRangeText || "框选区域，已附区域截图";
-    }
-
-    if (item.shape?.type === "point" || item.type === "point") {
-      return item.snapshotRangeText || "标记点附近，已附周边截图";
-    }
-
-    return "页面可视区域，已附截图";
+    return "截图";
   }
 
   function formatTime(value) {
