@@ -1,15 +1,24 @@
 {
   "manifest_version": 3,
   "name": "网页反馈标注器",
-  "version": "0.5.12",
-  "description": "通过低打扰悬浮球在网页上标注反馈，并导出包含图文的 PDF 反馈清单。",
+  "version": "0.5.13",
+  "description": "低打扰网页反馈标注工具，支持人工批注、AI 辅助检查、快照 HTML 和 PDF 导出。",
   "icons": {
     "16": "assets/icons/icon-16.png",
     "32": "assets/icons/icon-32.png",
     "48": "assets/icons/icon-48.png",
     "128": "assets/icons/icon-128.png"
   },
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "notifications"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
   "background": {
     "service_worker": "src/background.js"
   },

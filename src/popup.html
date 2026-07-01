@@ -25,10 +25,58 @@
 
       <section class="primary-actions" aria-label="主要操作">
         <button id="startAnnotationBtn" class="primary action-main" type="button">进入批注模式</button>
-        <div class="secondary-actions">
-          <button id="exportPdfBtn" type="button">导出 PDF</button>
-          <button id="clearCurrentBtn" type="button">清空当前页</button>
+      </section>
+
+      <section class="ai-action-panel" aria-label="AI 辅助检查">
+        <div class="action-copy">
+          <strong>AI 辅助检查</strong>
+          <span>检查页面文字低级错误，生成待确认标记</span>
         </div>
+        <button id="aiScanBtn" class="ai-action" type="button">开始检查</button>
+      </section>
+
+      <section class="export-actions" aria-label="导出报告">
+        <div class="section-heading">
+          <h2>导出报告</h2>
+        </div>
+        <div class="export-grid">
+          <button id="exportHtmlBtn" type="button">快照 HTML</button>
+          <button id="exportPdfBtn" type="button">PDF</button>
+        </div>
+      </section>
+
+      <section class="page-maintenance" aria-label="页面管理">
+        <button id="clearCurrentBtn" class="danger-ghost" type="button">清空当前页反馈</button>
+      </section>
+
+      <section id="aiSettingsPanel" class="ai-settings" hidden>
+        <div class="section-heading">
+          <h2>AI 检查设置</h2>
+          <button id="aiSettingsCloseBtn" class="text-button" type="button">收起</button>
+        </div>
+        <label>
+          <span>服务</span>
+          <select id="aiProviderSelect">
+            <option value="zhipu">智谱 AI</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="mock">Mock 测试模式</option>
+            <option value="custom">OpenAI-compatible</option>
+          </select>
+        </label>
+        <label>
+          <span>Base URL</span>
+          <input id="aiBaseUrlInput" type="url" placeholder="https://api.deepseek.com" />
+        </label>
+        <label>
+          <span>模型</span>
+          <input id="aiModelInput" type="text" placeholder="deepseek-chat" />
+        </label>
+        <label>
+          <span>API Key</span>
+          <input id="aiApiKeyInput" type="password" placeholder="只保存在本地" />
+        </label>
+        <p class="ai-note">AI 检查会把抽取后的网页文本发送到你配置的服务，不上传截图；Mock 测试模式不会发送网络请求。</p>
+        <button id="aiSettingsSaveBtn" class="primary" type="button">保存设置</button>
       </section>
 
       <section id="assistPanel" class="assist-panel" hidden>
@@ -63,6 +111,7 @@
       <p id="status" class="status" role="status"></p>
     </main>
 
+    <script src="./ai-core.js"></script>
     <script src="./pdf.js"></script>
     <script src="./popup.js" type="module"></script>
   </body>

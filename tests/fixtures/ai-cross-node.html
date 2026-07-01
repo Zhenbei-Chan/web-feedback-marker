@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>AI 测试页 - 跨节点文本</title>
+    <style>
+      body { margin: 0; background: #111827; color: #e5e7eb; font: 18px/1.9 system-ui, sans-serif; }
+      main { max-width: 760px; margin: 56px auto; border-radius: 16px; background: #1f2937; padding: 40px; }
+      strong { color: #fbbf24; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>跨节点文本测试</h1>
+        <p>这段文字故意把错误词拆开：请点击<strong>确诊</strong><strong>按钮</strong>提交表单。</p>
+        <p>Mock AI 会返回“确诊按钮”，但页面文字被拆在两个 DOM 节点中，因此应进入反馈清单，不应画页面标记。</p>
+      </article>
+    </main>
+  </body>
+</html>

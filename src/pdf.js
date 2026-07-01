@@ -21,19 +21,21 @@
     primary: "#1769e0",
     primaryDark: "#0f55b8",
     primarySoft: "#eef4ff",
-    quoteLine: "#bcd2ff"
+    quoteLine: "#bcd2ff",
+    ai: "#b45309",
+    aiSoft: "#fffbeb"
   };
 
-  async function exportFeedbackPdf({ title, url, items }) {
+  async function exportFeedbackPdf({ title, url, items, aiFindings = [] }) {
     const exportedAt = new Date();
     const pageTitle = title || "未命名页面";
     const reportTitle = buildReportTitle(pageTitle, exportedAt);
-    const pages = await renderReportPages({ pageTitle, url, items, exportedAt });
+    const pages = await renderReportPages({ pageTitle, url, items: items || [], aiFindings: aiFindings || [], exportedAt });
     const blob = buildImagePdf(pages);
     downloadBlob(blob, `${sanitizeFileName(reportTitle)}.pdf`);
   }
 
-  async function renderReportPages({ pageTitle, url, items, exportedAt }) {
+  async function renderReportPages({ pageTitle, url, items, aiFindings, exportedAt }) {
     const pages = [];
     let canvas = createPage();
     let ctx = canvas.getContext("2d");
@@ -61,7 +63,7 @@
       pageTitle: pageTitle || "未命名页面",
       url: url || "",
       exportedAt,
-      count: items.length
+      count: items.length + aiFindings.length
     });
 
     for (let index = 0; index < items.length; index += 1) {
@@ -87,6 +89,18 @@
       }
 
       y += 18;
+    }
+
+    if (aiFindings.length) {
+      ensureSpace(120);
+      y = drawAiSectionHeader(ctx, y);
+
+      for (let index = 0; index < aiFindings.length; index += 1) {
+        const finding = aiFindings[index];
+        const height = getAiFindingHeight(ctx, finding);
+        ensureSpace(height + 38);
+        y = drawAiFinding(ctx, finding, index + 1, y);
+      }
     }
 
     finishPage();
@@ -120,7 +134,7 @@
     setFont(ctx, 600, 20);
     ctx.fillText("Web Feedback Marker", PAGE_WIDTH - MARGIN, y + 6);
     setFont(ctx, 400, 19);
-    ctx.fillText(formatTime(exportedAt), PAGE_WIDTH - MARGIN, y + 36);
+    ctx.fillText(formatDateOnly(exportedAt), PAGE_WIDTH - MARGIN, y + 36);
     ctx.textAlign = "left";
 
     y += 70;
@@ -170,7 +184,7 @@
 
     ctx.fillStyle = COLORS.muted;
     setFont(ctx, 500, 22);
-    ctx.fillText(`${item.category || "其他"} · ${getItemTypeLabel(item)} · ${formatTime(item.createdAt)}`, headingX, y + 50);
+    ctx.fillText(`${item.category || "其他"} · ${getItemTypeLabel(item)} · ${formatDateOnly(item.createdAt)}`, headingX, y + 50);
     return y + 76;
   }
 
@@ -296,11 +310,96 @@
     return "截图";
   }
 
-  function formatTime(value) {
+  function formatDateOnly(value) {
     if (!value) {
       return "-";
     }
-    return new Date(value).toLocaleString("zh-CN");
+    return new Date(value).toLocaleDateString("zh-CN");
+  }
+
+  function drawAiSectionHeader(ctx, y) {
+    drawRule(ctx, y);
+    y += 48;
+    ctx.fillStyle = COLORS.ai;
+    setFont(ctx, 850, 32);
+    ctx.fillText("AI 检查结果", MARGIN, y);
+    ctx.fillStyle = COLORS.muted;
+    setFont(ctx, 400, 20);
+    ctx.fillText("以下内容由用户配置的 AI 服务识别，默认需要人工确认。", MARGIN, y + 34);
+    return y + 74;
+  }
+
+  function drawAiFinding(ctx, finding, number, y) {
+    const badgeSize = 38;
+    const badgeX = MARGIN + badgeSize / 2;
+    const badgeY = y + 18;
+
+    ctx.fillStyle = COLORS.ai;
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, badgeSize / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    setFont(ctx, 800, 18);
+    ctx.textAlign = "center";
+    ctx.fillText(String(number), badgeX, badgeY + 7);
+    ctx.textAlign = "left";
+
+    const x = MARGIN + badgeSize + 20;
+    ctx.fillStyle = COLORS.text;
+    setFont(ctx, 800, 25);
+    ctx.fillText(finding.errorType || "疑似问题", x, y + 12);
+
+    ctx.fillStyle = COLORS.muted;
+    setFont(ctx, 500, 19);
+    ctx.fillText(`${getAiStatusText(finding.status)} · ${finding.category || "其他"} · ${formatDateOnly(finding.createdAt)}`, x, y + 42);
+
+    let nextY = y + 78;
+    nextY = drawAiTextBlock(ctx, "问题", finding.reason || finding.issue || "AI 检查发现疑似问题。", nextY);
+    if (finding.originalText) {
+      nextY = drawAiTextBlock(ctx, "原文", finding.originalText, nextY);
+    }
+    if (finding.suggestedText) {
+      nextY = drawAiTextBlock(ctx, "建议", finding.suggestedText, nextY);
+    }
+
+    return nextY + 26;
+  }
+
+  function drawAiTextBlock(ctx, label, text, y) {
+    ctx.fillStyle = COLORS.muted;
+    setFont(ctx, 800, 19);
+    ctx.fillText(label, MARGIN + 58, y);
+
+    ctx.fillStyle = label === "建议" ? COLORS.ai : "#475467";
+    setFont(ctx, 400, 22);
+    const lines = wrapText(ctx, text || "-", CONTENT_WIDTH - 160, 4);
+    lines.forEach((line, index) => {
+      ctx.fillText(line, MARGIN + 124, y + index * 32);
+    });
+
+    return y + Math.max(32, lines.length * 32) + 12;
+  }
+
+  function getAiFindingHeight(ctx, finding) {
+    let height = 104;
+    height += getAiTextBlockHeight(ctx, finding.reason || finding.issue || "AI 检查发现疑似问题。");
+    if (finding.originalText) {
+      height += getAiTextBlockHeight(ctx, finding.originalText);
+    }
+    if (finding.suggestedText) {
+      height += getAiTextBlockHeight(ctx, finding.suggestedText);
+    }
+    return height + 26;
+  }
+
+  function getAiTextBlockHeight(ctx, text) {
+    setFont(ctx, 400, 22);
+    const lines = wrapText(ctx, text || "-", CONTENT_WIDTH - 160, 4);
+    return Math.max(32, lines.length * 32) + 12;
+  }
+
+  function getAiStatusText(status) {
+    return status === "confirmed" ? "已确认" : "待确认";
   }
 
   function buildReportTitle(pageTitle, date) {
