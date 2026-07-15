@@ -32,7 +32,10 @@
           <strong>AI 辅助检查</strong>
           <span>检查页面文字低级错误，生成待确认标记</span>
         </div>
-        <button id="aiScanBtn" class="ai-action" type="button">开始检查</button>
+        <div class="ai-action-buttons">
+          <button id="aiSettingsOpenBtn" class="ai-settings-open" type="button">设置</button>
+          <button id="aiScanBtn" class="ai-action" type="button">开始检查</button>
+        </div>
       </section>
 
       <section class="export-actions" aria-label="导出报告">
@@ -59,10 +62,12 @@
           <select id="aiProviderSelect">
             <option value="zhipu">智谱 AI</option>
             <option value="deepseek">DeepSeek</option>
+            <option value="gemini">Google Gemini</option>
             <option value="mock">Mock 测试模式</option>
             <option value="custom">OpenAI-compatible</option>
           </select>
         </label>
+        <p id="aiProviderHint" class="ai-provider-hint"></p>
         <label>
           <span>Base URL</span>
           <input id="aiBaseUrlInput" type="url" placeholder="https://api.deepseek.com" />
@@ -73,9 +78,9 @@
         </label>
         <label>
           <span>API Key</span>
-          <input id="aiApiKeyInput" type="password" placeholder="只保存在本地" />
+          <input id="aiApiKeyInput" type="password" placeholder="只保存在本地" autocomplete="off" />
         </label>
-        <p class="ai-note">AI 检查会把抽取后的网页文本发送到你配置的服务，不上传截图；Mock 测试模式不会发送网络请求。</p>
+        <p class="ai-note">AI 检查会把抽取后的网页文本发送到你选择的服务，不上传截图；API Key 只保存在本地。Gemini 请使用独立的 Google Gemini 选项。</p>
         <button id="aiSettingsSaveBtn" class="primary" type="button">保存设置</button>
       </section>
 
@@ -112,6 +117,8 @@
     </main>
 
     <script src="./ai-core.js"></script>
+    <script src="./page-access.js"></script>
+    <script src="./ai-provider.js"></script>
     <script src="./pdf.js"></script>
     <script src="./popup.js" type="module"></script>
   </body>

@@ -9,6 +9,7 @@
   const AI_FINDINGS_KEY = "webFeedbackAssistant.aiFindings";
   const AI_SCAN_STATE_KEY = "webFeedbackAssistant.aiScanState";
   const AiCore = globalThis.WebFeedbackAiCore;
+  const SnapshotCore = globalThis.WebFeedbackSnapshotCore;
   const DOCK_POSITION_KEY = "webFeedbackAssistant.dockPosition";
   const CATEGORIES = ["内容错误", "表达不清", "结构问题", "链接问题", "视觉建议", "其他"];
   const MARK_COLOR = "#f04438";
@@ -23,9 +24,7 @@
   const DOCK_AVOID_GAP = 12;
   const DOCK_MENU_HEIGHT = 368;
   const DOCK_OBSTACLE_SCAN_TTL = 800;
-  const HTML_SNAPSHOT_PADDING = 260;
-  const HTML_SNAPSHOT_OVERLAP = 120;
-  const HTML_SNAPSHOT_JPEG_QUALITY = 0.84;
+  const HTML_SNAPSHOT_STYLE_ID = "web-feedback-snapshot-capture-style";
   const MAX_AI_SCAN_BLOCKS = 12;
   const AI_DEBUG_PREVIEW_LENGTH = 160;
 
@@ -661,7 +660,7 @@
     }
 
     const annotations = orderedItems.map((item, index) => toExportAnnotation(item, index + 1));
-    const snapshot = await captureHtmlSnapshot(annotations);
+    const snapshot = await captureHtmlSnapshot();
     const html = buildSnapshotHtmlExport({
       page,
       exportedAt: new Date(),
@@ -671,34 +670,28 @@
     downloadTextFile(html, `${sanitizeFileName(truncateText(page.title || "网页反馈", 24))}-反馈标注.html`);
   }
 
-  async function captureHtmlSnapshot(annotations) {
+  async function captureHtmlSnapshot() {
     const originalX = window.scrollX;
     const originalY = window.scrollY;
-    const segmentsToCapture = planHtmlSnapshotSegments(annotations, originalX);
-    const capturedSegments = [];
+    let captureStyle = null;
 
     overlay?.root.classList.add("is-capturing");
+    captureStyle = installSnapshotCaptureStyle();
     await waitNextFrame();
     await waitNextFrame();
 
     try {
-      for (const segment of segmentsToCapture) {
-        window.scrollTo(originalX, segment.scrollY);
-        await waitNextFrame();
-        await waitNextFrame();
-
-        const capture = await chrome.runtime.sendMessage({ type: "CAPTURE_VISIBLE_TAB" });
-        if (!capture?.dataUrl) {
-          throw new Error(capture?.error || "无法截取页面快照。");
-        }
-
-        capturedSegments.push({
-          ...segment,
-          imageDataUrl: await compressCaptureDataUrl(capture.dataUrl)
-        });
+      await warmUpSnapshotPage();
+      await scrollToSnapshotPosition(0);
+      await waitNextFrame();
+      const capture = await chrome.runtime.sendMessage({ type: "CAPTURE_FULL_PAGE_CDP" });
+      if (!capture?.snapshot) {
+        throw new Error(capture?.error || "无法截取连续网页快照。");
       }
+      return capture.snapshot;
     } finally {
       window.scrollTo(originalX, originalY);
+      captureStyle?.remove();
       overlay?.root.classList.remove("is-capturing");
       await waitNextFrame();
       if (overlay && session) {
@@ -706,88 +699,83 @@
       }
     }
 
-    return {
-      scrollX: originalX,
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      documentHeight: getDocumentHeight(),
-      segments: capturedSegments
-    };
   }
 
-  function planHtmlSnapshotSegments(annotations, scrollX) {
-    const viewportHeight = Math.max(320, window.innerHeight);
-    const viewportWidth = Math.max(320, window.innerWidth);
-    const documentHeight = getDocumentHeight();
-    const maxScrollY = Math.max(0, documentHeight - viewportHeight);
-    const ranges = annotations
-      .map((annotation) => getAnnotationVerticalRange(annotation.shape))
-      .map((range) => ({
-        start: clamp(range.start - HTML_SNAPSHOT_PADDING, 0, maxScrollY),
-        end: clamp(range.end + HTML_SNAPSHOT_PADDING, 0, documentHeight)
-      }))
-      .sort((a, b) => a.start - b.start);
-    const mergedRanges = [];
-
-    ranges.forEach((range) => {
-      const previous = mergedRanges[mergedRanges.length - 1];
-      if (previous && range.start <= previous.end + HTML_SNAPSHOT_OVERLAP) {
-        previous.end = Math.max(previous.end, range.end);
-      } else {
-        mergedRanges.push({ ...range });
+  function installSnapshotCaptureStyle() {
+    document.getElementById(HTML_SNAPSHOT_STYLE_ID)?.remove();
+    const style = document.createElement("style");
+    style.id = HTML_SNAPSHOT_STYLE_ID;
+    style.textContent = `
+      html { scroll-behavior: auto !important; scroll-snap-type: none !important; }
+      *, *::before, *::after {
+        overflow-anchor: none !important;
+        scroll-behavior: auto !important;
+        scroll-snap-align: none !important;
+        animation-play-state: paused !important;
+        transition-duration: 0s !important;
       }
+    `;
+    document.documentElement.appendChild(style);
+    return style;
+  }
+
+  async function warmUpSnapshotPage() {
+    const viewportHeight = Math.max(320, window.innerHeight);
+    const positions = SnapshotCore.planScrollPositions({
+      documentHeight: getDocumentHeight(),
+      viewportHeight
     });
-
-    if (!mergedRanges.length) {
-      mergedRanges.push({
-        start: clamp(window.scrollY, 0, maxScrollY),
-        end: clamp(window.scrollY + viewportHeight, 0, documentHeight)
-      });
+    for (const position of positions) {
+      window.scrollTo({ left: 0, top: position, behavior: "auto" });
+      await waitNextFrame();
     }
+    await waitForSnapshotImages();
+    await waitForSnapshotLayoutStable();
+  }
 
-    const positions = [];
-    const step = Math.max(240, viewportHeight - HTML_SNAPSHOT_OVERLAP);
-    mergedRanges.forEach((range) => {
-      const rangeHeight = range.end - range.start;
-      if (rangeHeight <= viewportHeight) {
-        positions.push(clamp(Math.round((range.start + range.end - viewportHeight) / 2), 0, maxScrollY));
+  async function waitForSnapshotImages() {
+    const pending = [...document.images].filter((image) => !image.complete);
+    if (!pending.length) {
+      return;
+    }
+    const settled = Promise.all(pending.map((image) => new Promise((resolve) => {
+      if (image.complete) {
+        resolve();
         return;
       }
-
-      for (let y = range.start; y < range.end; y += step) {
-        positions.push(clamp(Math.round(y), 0, maxScrollY));
-      }
-      positions.push(clamp(Math.round(range.end - viewportHeight), 0, maxScrollY));
-    });
-
-    const uniquePositions = [...new Set(positions)]
-      .sort((a, b) => a - b)
-      .filter((position, index, values) => index === 0 || Math.abs(position - values[index - 1]) > 40);
-
-    return uniquePositions.map((scrollY, index) => ({
-      index,
-      scrollX,
-      scrollY,
-      width: viewportWidth,
-      height: viewportHeight
-    }));
+      image.addEventListener("load", resolve, { once: true });
+      image.addEventListener("error", resolve, { once: true });
+    })));
+    await Promise.race([
+      settled,
+      new Promise((resolve) => setTimeout(resolve, 1200))
+    ]);
   }
 
-  function getAnnotationVerticalRange(shape = {}) {
-    if (shape.type === "region") {
-      const top = Math.min(shape.y || 0, (shape.y || 0) + (shape.height || 0));
-      const bottom = Math.max(shape.y || 0, (shape.y || 0) + (shape.height || 0));
-      return {
-        start: top,
-        end: Math.max(top + 1, bottom)
-      };
-    }
+  async function scrollToSnapshotPosition(scrollY) {
+    window.scrollTo({ left: 0, top: scrollY, behavior: "auto" });
+    await waitForSnapshotLayoutStable();
+  }
 
-    const y = Number.isFinite(shape.y) ? shape.y : 0;
-    return {
-      start: y - POINT_CAPTURE_HEIGHT / 2,
-      end: y + POINT_CAPTURE_HEIGHT / 2
-    };
+  async function waitForSnapshotLayoutStable() {
+    let stableFrames = 0;
+    let previousY = -1;
+    let previousHeight = -1;
+    for (let frame = 0; frame < 12; frame += 1) {
+      await waitNextFrame();
+      const currentY = Math.round(window.scrollY);
+      const currentHeight = getDocumentHeight();
+      if (currentY === previousY && currentHeight === previousHeight) {
+        stableFrames += 1;
+        if (stableFrames >= 2) {
+          return;
+        }
+      } else {
+        stableFrames = 0;
+      }
+      previousY = currentY;
+      previousHeight = currentHeight;
+    }
   }
 
   function getDocumentHeight() {
@@ -800,23 +788,14 @@
     ));
   }
 
-  async function compressCaptureDataUrl(dataUrl) {
-    const image = await loadImage(dataUrl);
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(image, 0, 0);
-    return canvas.toDataURL("image/jpeg", HTML_SNAPSHOT_JPEG_QUALITY);
-  }
-
   function buildSnapshotHtmlExport({ page, exportedAt, annotations, snapshot }) {
     const pageTitle = escapeHtml(page.title || "未命名页面");
     const pageUrl = escapeHtml(page.url || location.href);
     const exportedTime = escapeHtml(formatDateOnly(exportedAt));
     const segmentsHtml = snapshot.segments
-      .map((segment) => renderSnapshotSegment(segment, annotations, snapshot))
+      .map(renderSnapshotSegment)
       .join("");
+    const markersHtml = annotations.map((annotation) => renderSnapshotMarker(annotation, snapshot)).join("");
     const panelHtml = renderSnapshotPanel({
       pageTitle,
       pageUrl,
@@ -843,77 +822,44 @@
   </header>
   <main class="wfm-snapshot-layout">
     <section class="wfm-snapshot-stage" aria-label="网页快照" style="width:${snapshot.viewportWidth}px">
-      ${segmentsHtml}
+      <div class="wfm-snapshot-canvas">
+        ${segmentsHtml}
+        <div class="wfm-snapshot-marker-layer">${markersHtml}</div>
+      </div>
     </section>
     ${panelHtml}
   </main>
-  <script>${getSnapshotHtmlScript(annotations, snapshot)}</script>
+  <script>${getSnapshotHtmlScript(annotations)}</script>
 </body>
 </html>`;
   }
 
-  function renderSnapshotSegment(segment, annotations, snapshot) {
-    const markers = annotations
-      .filter((annotation) => getAnnotationSegmentIndex(annotation, snapshot) === segment.index)
-      .map((annotation) => renderSnapshotMarker(annotation, segment))
-      .join("");
-
-    return `
-      <section class="wfm-snapshot-segment" data-wfm-segment="${segment.index}" style="width:${segment.width}px;height:${segment.height}px">
-        <img src="${segment.imageDataUrl}" alt="网页快照片段 ${segment.index + 1}">
-        ${markers}
-      </section>
-    `;
+  function renderSnapshotSegment(segment) {
+    return `<img class="wfm-snapshot-segment" data-wfm-segment="${segment.index}" src="${segment.imageDataUrl}" alt="网页快照片段 ${segment.index + 1}" style="aspect-ratio:${segment.width}/${segment.height}">`;
   }
 
-  function renderSnapshotMarker(annotation, segment) {
+  function renderSnapshotMarker(annotation, snapshot) {
     const shape = annotation.shape || {};
-    const point = getSnapshotMarkerPoint(annotation, segment);
+    const point = SnapshotCore.toPercentPosition({
+      x: clamp(annotation.point.x || 0, 0, snapshot.viewportWidth),
+      y: clamp(annotation.point.y || 0, 0, snapshot.documentHeight)
+    }, snapshot);
+    const regionRect = SnapshotCore.toPercentRect({
+      x: shape.x || 0,
+      y: shape.y || 0,
+      width: shape.width || 0,
+      height: shape.height || 0
+    }, snapshot);
     const region = shape.type === "region"
-      ? `<span class="wfm-snapshot-region" data-wfm-id="${escapeHtml(annotation.id)}" style="left:${Math.round((shape.x || 0) - segment.scrollX)}px;top:${Math.round((shape.y || 0) - segment.scrollY)}px;width:${Math.round(shape.width || 0)}px;height:${Math.round(shape.height || 0)}px"></span>`
+      ? `<span class="wfm-snapshot-region" data-wfm-id="${escapeHtml(annotation.id)}" style="left:${regionRect.left}%;top:${regionRect.top}%;width:${regionRect.width}%;height:${regionRect.height}%"></span>`
       : "";
 
     return `
       ${region}
-      <button class="wfm-snapshot-marker" type="button" data-wfm-id="${escapeHtml(annotation.id)}" data-wfm-anchor="${escapeHtml(annotation.id)}" style="left:${point.x}px;top:${point.y}px" aria-label="标注点 ${annotation.number}">
+      <button class="wfm-snapshot-marker" type="button" data-wfm-id="${escapeHtml(annotation.id)}" data-wfm-anchor="${escapeHtml(annotation.id)}" style="left:${point.left}%;top:${point.top}%" aria-label="标注点 ${annotation.number}">
         ${annotation.number}
       </button>
     `;
-  }
-
-  function getSnapshotMarkerPoint(annotation, segment) {
-    const shape = annotation.shape || {};
-    if (shape.type === "region") {
-      return {
-        x: Math.round((shape.x || 0) - segment.scrollX),
-        y: clamp(Math.round((shape.y || 0) - segment.scrollY), 18, segment.height - 18)
-      };
-    }
-
-    return {
-      x: Math.round((shape.x || 0) - segment.scrollX),
-      y: Math.round((shape.y || 0) - segment.scrollY)
-    };
-  }
-
-  function getAnnotationSegmentIndex(annotation, snapshot) {
-    const targetY = annotation.shape?.type === "region"
-      ? (annotation.shape.y || 0)
-      : annotation.point.y;
-    const containing = snapshot.segments.find((segment) =>
-      targetY >= segment.scrollY && targetY <= segment.scrollY + segment.height
-    );
-
-    if (containing) {
-      return containing.index;
-    }
-
-    return snapshot.segments
-      .map((segment) => ({
-        index: segment.index,
-        distance: Math.abs(targetY - (segment.scrollY + segment.height / 2))
-      }))
-      .sort((a, b) => a.distance - b.distance)[0]?.index || 0;
   }
 
   function renderSnapshotPanel({ pageTitle, pageUrl, exportedTime, annotations }) {
@@ -932,7 +878,7 @@
           <p><span>原页面</span><strong title="${pageTitle}">${pageTitle}</strong></p>
           <p><span>URL</span><a href="${pageUrl}" title="${pageUrl}" target="_blank" rel="noreferrer">${pageUrl}</a></p>
           <p><span>导出日期</span><strong>${exportedTime}</strong></p>
-          <em>网页快照 HTML：主体内容为导出时截图，标记位置不依赖原网页重新排版。</em>
+          <em>网页快照 HTML：主体为导出时的连续截图，标记位置不依赖原网页重新排版。</em>
         </footer>
       </aside>
     `;
@@ -951,7 +897,7 @@
         <span class="wfm-snapshot-feed-number">${annotation.number}</span>
         <div>
           <strong>${escapeHtml(annotation.issue)}</strong>
-          <p>${escapeHtml(annotation.category)} 路 ${escapeHtml(formatDateOnly(annotation.createdAt))}</p>
+          <p>${escapeHtml(annotation.category)} · ${escapeHtml(formatDateOnly(annotation.createdAt))}</p>
           ${quote}
           ${evidence}
         </div>
@@ -971,10 +917,11 @@
       .wfm-snapshot-header a { display: block; max-width: 920px; margin-top: 4px; overflow: hidden; color: #667085; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
       .wfm-snapshot-header strong { flex: 0 0 auto; border-radius: 999px; background: #eaf1ff; color: #1769e0; padding: 8px 12px; font-size: 13px; }
       .wfm-snapshot-layout { position: relative; padding: 28px 420px 48px 32px; }
-      .wfm-snapshot-stage { display: grid; gap: 18px; max-width: 100%; }
-      .wfm-snapshot-segment { position: relative; overflow: hidden; border: 1px solid #d0d5dd; border-radius: 12px; background: #fff; box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08); }
-      .wfm-snapshot-segment > img { display: block; width: 100%; height: 100%; object-fit: fill; user-select: none; }
-      .wfm-snapshot-marker { position: absolute; z-index: 3; display: grid; width: 30px; height: 30px; place-items: center; transform: translate(-50%, -50%); border: 2px solid #fff; border-radius: 999px; background: #1769e0; box-shadow: 0 10px 22px rgba(23, 105, 224, 0.24); color: #fff; cursor: pointer; font: 800 15px/1 system-ui, sans-serif; }
+      .wfm-snapshot-stage { max-width: 100%; }
+      .wfm-snapshot-canvas { position: relative; overflow: hidden; border: 1px solid #d0d5dd; border-radius: 12px; background: #fff; box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08); }
+      .wfm-snapshot-segment { display: block; width: 100%; height: auto; user-select: none; }
+      .wfm-snapshot-marker-layer { position: absolute; inset: 0; pointer-events: none; }
+      .wfm-snapshot-marker { position: absolute; z-index: 3; display: grid; width: 30px; height: 30px; place-items: center; transform: translate(-50%, -50%); border: 2px solid #fff; border-radius: 999px; background: #1769e0; box-shadow: 0 10px 22px rgba(23, 105, 224, 0.24); color: #fff; cursor: pointer; pointer-events: auto; font: 800 15px/1 system-ui, sans-serif; }
       .wfm-snapshot-marker.is-active { width: 36px; height: 36px; background: #0f55b8; box-shadow: 0 0 0 8px rgba(23, 105, 224, 0.14), 0 12px 28px rgba(23, 105, 224, 0.28); }
       .wfm-snapshot-region { position: absolute; z-index: 2; border: 2px solid rgba(23, 105, 224, 0.72); border-radius: 8px; background: rgba(23, 105, 224, 0.08); pointer-events: none; }
       .wfm-snapshot-region.is-active { box-shadow: 0 0 0 4px rgba(23, 105, 224, 0.14); }
@@ -1006,10 +953,9 @@
     `;
   }
 
-  function getSnapshotHtmlScript(annotations, snapshot) {
+  function getSnapshotHtmlScript(annotations) {
     const data = JSON.stringify(annotations.map((annotation) => ({
-      id: annotation.id,
-      segmentIndex: getAnnotationSegmentIndex(annotation, snapshot)
+      id: annotation.id
     }))).replace(/</g, "\\u003c");
 
     return `
@@ -1027,8 +973,7 @@
           if (!item) return;
           setActive(id);
           const marker = document.querySelector("[data-wfm-anchor='" + CSS.escape(id) + "']");
-          const segment = document.querySelector("[data-wfm-segment='" + item.segmentIndex + "']");
-          (marker || segment)?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+          (marker || document.querySelector(".wfm-snapshot-stage"))?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
         };
         document.querySelectorAll("[data-wfm-jump],.wfm-snapshot-marker").forEach((node) => {
           node.addEventListener("click", (event) => {
@@ -1174,8 +1119,8 @@
       id: item.id || `item-${number}`,
       number,
       type: item.type || shape.type || "point",
-      category: item.category || "鍏朵粬",
-      issue: item.issue || "鏈～鍐欏弽棣堝唴瀹?",
+      category: item.category || "其他",
+      issue: item.issue || "未填写反馈内容",
       createdAt: item.createdAt || "",
       selectedText: item.selectedText || "",
       imageDataUrl: item.imageDataUrl || "",
@@ -1253,7 +1198,7 @@
         <span class="wfm-export-feed-number">${annotation.number}</span>
         <span class="wfm-export-feed-body">
           <strong>${escapeHtml(annotation.issue)}</strong>
-          <em>${escapeHtml(annotation.category)} 路 ${escapeHtml(formatDateOnly(annotation.createdAt))}</em>
+          <em>${escapeHtml(annotation.category)} · ${escapeHtml(formatDateOnly(annotation.createdAt))}</em>
           ${quote}
           ${evidence}
         </span>
@@ -3528,7 +3473,7 @@
     }
 
     if (/Cannot access contents|The extensions gallery|chrome:\/\/|edge:\/\//i.test(rawMessage)) {
-      return "当前页面不允许插件注入脚本。请在普通网页中使用，或刷新页面后重试。";
+      return "当前页面不允许插件注入脚本。请在普通网页或已授权的本地 HTML 文件中使用；如果是本地文件，请确认已开启“允许访问文件网址”并刷新页面。";
     }
 
     if (/Failed to fetch|NetworkError|network/i.test(rawMessage)) {

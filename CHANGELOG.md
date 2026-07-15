@@ -1,6 +1,24 @@
 # Changelog
 
-## 0.5.13 (local, not released)
+## 0.5.15 (local, not released)
+
+- 快照 HTML 的整页截图改为 `chrome.debugger` 调用 CDP `Page.captureScreenshot`，不再依赖页面滚动和 `captureVisibleTab` 拼接。
+- 普通长度页面使用单段文档坐标截图；超长页面使用连续、无重叠的文档坐标分片，避免滚动重排造成正文割裂。
+- CDP 调试会话仅在用户主动导出快照期间连接，并在成功、失败或页面关闭后立即断开。
+- 保留 `captureVisibleTab` 作为单条反馈局部证据截图，不扩大其他批注流程的权限使用范围。
+- 新增 CDP 真实调用边界、连续分片与失败断开回归测试，并补充权限和错误处理说明。
+
+## 0.5.14 (local, not released)
+
+- 支持在用户开启 Chrome“允许访问文件网址”后批注本地 `file://` HTML，并补充明确的权限引导。
+- 新增 Google Gemini 原生 Provider，使用 `generateContent` 与 `x-goog-api-key`，并自动迁移旧的原生 Gemini 自定义设置。
+- AI 功能区新增常驻设置入口，切换 Provider 时不再静默复用旧服务的 API Key。
+- 将 AI Provider 的预设、校验、请求构建和响应读取集中到 `src/ai-provider.js`。
+- 快照 HTML 改为从页面顶部到页面底部的连续截图，不再按标记范围生成离散片段；原滚动拼接方案已在 0.5.15 被 CDP 截图替代。
+- 截图请求统一串行节流，遵守 Chrome 每秒最多两次 `captureVisibleTab` 的限制。
+- 新增页面访问、AI Provider 和连续快照三组回归测试与本地长页面测试夹具。
+
+## 0.5.13
 
 - 新增网页快照 HTML 报告导出能力，生成带截图快照、页面编号标记和右上角“修改点全览”的 HTML 文件。
 - HTML 修改点全览参考信息流样式，以反馈内容为主，分类和时间作为辅助信息。

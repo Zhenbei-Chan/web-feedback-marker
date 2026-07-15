@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>本地长页面快照测试</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { font-family: "Microsoft YaHei", system-ui, sans-serif; color: #172033; }
+    body { margin: 0; background: #f4f6f9; }
+    .topbar { position: fixed; inset: 0 0 auto; z-index: 10; height: 64px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #d8dee9; background: #fff; padding: 0 8vw; }
+    .topbar strong { font-size: 18px; }
+    main { width: min(880px, calc(100% - 40px)); margin: 0 auto; padding: 96px 0 80px; }
+    .hero { min-height: 520px; display: grid; align-content: center; border-bottom: 1px solid #ccd5e3; }
+    h1 { max-width: 720px; margin: 0; font-size: 48px; line-height: 1.15; }
+    .lead { max-width: 700px; color: #596579; font-size: 20px; line-height: 1.8; }
+    article { background: #fff; }
+    section { min-height: 760px; border-bottom: 1px solid #d8dee9; padding: 48px 56px; }
+    section:nth-child(even) { background: #f9fafb; }
+    h2 { position: sticky; top: 64px; margin: -48px -56px 28px; border-bottom: 1px solid #d8dee9; background: #fff; padding: 18px 56px; }
+    p { margin: 0 0 24px; font-size: 18px; line-height: 2; }
+    .visual { height: 260px; margin: 32px 0; border: 2px solid #8eb2f4; background: #eaf1ff; }
+    footer { padding: 48px 8vw; background: #172033; color: #fff; }
+  </style>
+</head>
+<body>
+  <header class="topbar"><strong>固定顶部导航</strong><span>快照中只应出现一次</span></header>
+  <main>
+    <div class="hero">
+      <h1>本地 HTML、连续截图与固定导航测试页</h1>
+      <p class="lead">用于验证 file:// 页面批注、Mock AI 检查和长页面快照。页面中包含“确诊按钮”“重复重复”和 Lorem ipsum 测试文本。</p>
+    </div>
+    <article>
+      <section>
+        <h2>第一章：页面顶部</h2>
+        <p>请点击确诊按钮提交表单。这句话用于 Mock AI 检查。</p>
+        <p>第一章正文需要与下一章连续衔接，导出的 HTML 中间不应出现卡片间距。</p>
+        <div class="visual"></div>
+        <p>这一段位于第一屏下方，用来观察固定顶部导航是否在第二次截图中重复。</p>
+      </section>
+      <section>
+        <h2>第二章：页面中部</h2>
+        <p>这里包含重复重复输入，用来验证待确认结果的定位。</p>
+        <p>Lorem ipsum dolor sit amet 是故意保留的占位文本。</p>
+        <div class="visual"></div>
+        <p>第二章结尾应直接连接第三章开头，不允许缺行、重行或截图片段错位。</p>
+      </section>
+      <section>
+        <h2>第三章：页面底部</h2>
+        <p>页面底部应由 CDP 文档坐标连续截取，不依赖滚动位置或重叠裁剪。</p>
+        <div class="visual"></div>
+        <p>看到这里说明页面主体已经完整覆盖。请在此处添加一个标记，用于验证底部标记坐标。</p>
+      </section>
+    </article>
+  </main>
+  <footer>页面底部：连续快照必须包含这一行。</footer>
+</body>
+</html>

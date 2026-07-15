@@ -250,6 +250,26 @@ h2 {
   padding: 0 12px;
 }
 
+.ai-action-buttons {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ai-settings-open {
+  min-width: 44px;
+  border-color: transparent;
+  background: transparent;
+  color: #8a6a2a;
+  font-size: 12px;
+  padding: 0 6px;
+}
+
+.ai-settings-open:hover:not(:disabled) {
+  border-color: #f6d98d;
+  background: #fff8dc;
+}
+
 .ai-action:hover:not(:disabled) {
   border-color: #eaaa08;
   background: #fff3c7;
@@ -316,9 +336,16 @@ h2 {
 }
 
 .ai-settings label span,
+.ai-provider-hint,
 .ai-note {
   color: var(--muted);
   font-size: 12px;
+}
+
+.ai-provider-hint {
+  margin: -3px 0 0;
+  color: #8a6a2a;
+  line-height: 1.4;
 }
 
 .ai-note {

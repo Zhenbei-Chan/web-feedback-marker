@@ -3,12 +3,12 @@
 ## 当前阶段
 
 - 阶段：Development / Regression。
-- 当前版本：0.5.13，本地未发布。
-- 当前任务：对齐当前需求、交互、验收和代码结构，稳定人工批注、AI 辅助检查、HTML/PDF 导出体验。
+- 当前版本：0.5.15，本地未发布、未同步 GitHub。
+- 当前任务：使用 CDP 替换快照 HTML 的滚动拼接截图，并完成长页面回归。
 
 ## 已确认决策
 
-- 插件保持 Manifest V3、本地优先、低权限。
+- 插件保持 Manifest V3、本地优先；`debugger` 高权限仅用于用户主动导出快照 HTML，并立即释放。
 - 默认不启用 AI；AI 检查必须由用户主动配置自己的 API Key。
 - 开源代码不内置任何 API Key，不提供默认云服务。
 - AI 结果默认是“待确认”，不能直接等同于人工确认反馈。
@@ -27,7 +27,9 @@
 - 可拖动、侧边吸附、半隐藏、自动避让的悬浮入口。
 - 快照 HTML 导出，主体为截图快照，右上角提供修改点全览。
 - PDF 导出，人工反馈在前，AI 待确认结果在后。
-- 用户自带 Key 的 AI 辅助检查，支持智谱、DeepSeek、自定义 OpenAI-compatible 服务和 Mock 测试模式。
+- 用户自带 Key 的 AI 辅助检查，支持智谱、DeepSeek、Google Gemini 原生接口、自定义 OpenAI-compatible 服务和 Mock 测试模式。
+- 普通网页和用户已授权的本地 `file://` HTML 均可批注。
+- 快照 HTML 使用 CDP 文档坐标连续整页截图，不依赖滚动拼接。
 - 页面右下角持续展示 AI 检查进度，Popup 关闭后检查继续。
 
 ## 非目标
@@ -46,13 +48,18 @@
 - `docs/08_TEST_PLAN.md`：当前回归测试计划。
 - `docs/ARCHITECTURE.md`：当前代码结构说明。
 - `src/ai-core.js`：AI 结果标准化、过滤、去重和状态规则。
+- `src/ai-provider.js`：Provider 协议、请求和响应适配。
+- `src/page-access.js`：网页、本地文件和受保护页面能力判断。
+- `src/cdp-capture.js`：CDP 截图与调试会话生命周期。
+- `src/snapshot-core.js`：快照预热、CDP 分片和坐标规则。
 
 ## 最近验证
 
-- 已使用 Codex 工作区 Node.js 对 `src/background.js`、`src/popup.js`、`src/content.js`、`src/ai-core.js` 做语法检查。
+- 已使用 Codex 工作区 Node.js 对全部 `src/*.js` 做语法检查。
 - 已验证 `manifest.json` 可被 JSON 解析。
-- 已执行 `git diff --check`，仅有 Windows CRLF 提示，无空白错误。
-- 当前环境未完成 Chrome 内真实通知、真实 AI 服务调用和完整手动回归，需要在浏览器中继续验证。
+- 已通过 `page-access`、`ai-provider`、`snapshot-core`、`cdp-capture`、`snapshot-export-contract`、`popup-contract`、`ai-core`、`background-ai-batching` 八组 smoke tests。
+- 已在本机 Chrome 无头 CDP 会话中验证固定长页面：3093px 页面单段输出，顶部导航只出现一次；25000px 页面按 `0/12000/24000` 文档坐标连续分片，边界文字连续。
+- 扩展新增权限后的重新启用提示、真实本地文件开关和真实 Gemini Key 仍需在用户 Chrome 中完成最终手动验收。
 
 ## 最近更新记录
 
@@ -62,3 +69,5 @@
 - 2026-06-29：AI 文本错误改为贴近原文的手绘下划线，不能精确定位时不生成页面坐标标记。
 - 2026-06-29：页面右下角作为唯一详细进度入口，错误提示持久展示并支持复制日志。
 - 2026-07-01：刷新需求、UI、验收、测试、隐私和代码结构文档，明确快照 HTML 优先、AI 加入反馈后的状态流转、通知权限失败日志和人工文本下划线。
+- 2026-07-10：0.5.14 将页面访问、AI Provider、快照坐标抽成独立模块；支持本地 HTML 与原生 Gemini；快照改为整页连续拼接并统一截图节流。
+- 2026-07-16：0.5.15 使用 `chrome.debugger` + CDP 文档坐标截图替换整页滚动拼接；局部反馈证据继续使用 `captureVisibleTab`。

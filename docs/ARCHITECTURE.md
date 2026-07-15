@@ -6,19 +6,23 @@
 
 - `manifest.json`：Manifest V3 配置、权限、入口和图标。
 - `src/background.js`：后台任务，负责截图、AI 服务调用、重试、通知和进度广播。
+- `src/cdp-capture.js`：CDP 整页截图适配层，负责 attach、页面尺寸读取、文档坐标截图和 finally detach。
 - `src/content.js`：页面内批注体验，负责悬浮入口、标记渲染、反馈填写、文本抽取、AI 结果定位、快照 HTML 导出。
 - `src/popup.html`：插件弹窗结构。
 - `src/popup.css`：插件弹窗视觉样式。
 - `src/popup.js`：弹窗控制台，负责进入批注模式、AI 设置、触发检查、导出、列表和状态提示。
 - `src/pdf.js`：本地 PDF 生成。
 - `src/ai-core.js`：AI 结果标准化、过滤、去重、状态和渲染模式规则。
+- `src/ai-provider.js`：AI Provider 预设、设置迁移、协议校验、请求构建和响应文本提取；区分 Gemini 原生协议与 OpenAI-compatible 协议。
+- `src/page-access.js`：普通网页、本地文件和受保护页面的统一能力判断与提示语。
+- `src/snapshot-core.js`：懒加载预热滚动计划、CDP 连续分片和响应式标记坐标计算。
 - `tests/fixtures/`：固定测试页面，用于普通正文、跨节点文本、无正文/复杂导航页验证。
 
 ## AI 数据流
 
 1. `content.js` 抽取页面正文文本块。
 2. `popup.js` 或页面菜单触发 AI 检查。
-3. `background.js` 分批请求用户配置的 AI 服务或 Mock provider。
+3. `background.js` 分批请求用户配置的 AI 服务或 Mock provider，网络请求由 `ai-provider.js` 按协议构建。
 4. `ai-core.js` 统一标准化、过滤和去重 AI 返回结果。
 5. `content.js` 尝试把结果映射到页面文字位置。
 6. 能定位的结果绘制为页面下划线；不能定位的结果只进入列表。
@@ -32,18 +36,22 @@
 - `background.js` 只负责外部调用、重试、通知和进度，不负责页面 DOM 定位。
 - `content.js` 可以处理 DOM、坐标和截图，但不应内置 Provider 请求逻辑。
 - `popup.js` 是控制台，不应承担沉浸式批注流程。
-- 新增 AI Provider 时，先保持 OpenAI-compatible 适配，避免增加复杂鉴权分支。
+- 新增 AI Provider 时，必须在 `ai-provider.js` 明确声明协议、鉴权、请求和响应结构；不在 Background 或 Popup 中猜测。
+- 页面访问能力统一由 `page-access.js` 判断；不在操作按钮中重复写 URL 正则。
+- HTML 快照只消费 CDP 返回的文档坐标截图，不使用滚动位置推算截图内容。
+- `background.js` 通过 `cdp-capture.js` 管理 `chrome.debugger` 生命周期；Content 不直接 attach 调试会话。
+- 局部反馈证据继续使用 `captureVisibleTab`，与整页快照通道分离。
 - 新增状态时，必须同步更新 `docs/01_REQUIREMENTS.md`、`docs/08_TEST_PLAN.md` 和 `docs/09_ACCEPTANCE.md`。
 
 ## 当前结构风险
 
 - `src/content.js` 仍然过大，包含页面 UI、截图、HTML 导出、AI 定位和状态提示。后续应按稳定边界拆分。
-- `src/background.js` 同时包含 Provider 请求、Mock provider、通知和错误归一化。后续可拆出 AI provider adapter。
+- `src/background.js` 仍包含 AI 批处理、Mock provider、通知和错误归一化；Provider 协议适配已拆出。
 - Popup 对 `ai-core.js` 已有最小兜底，避免脚本加载失败导致弹窗崩溃；长期应改成更清晰的依赖加载策略。
 
 ## 推荐下一步拆分
 
-1. 从 `content.js` 拆出 `snapshot-export`：只负责快照 HTML 和截图分段。
+1. 从 `content.js` 继续拆出 DOM 相关的 `snapshot-export`；CDP 采集已独立进入 `cdp-capture.js`。
 2. 从 `content.js` 拆出 `text-locator`：只负责文本匹配、矩形计算和下划线定位。
-3. 从 `background.js` 拆出 `ai-provider`：只负责请求、重试、错误归一化和 Mock provider。
+3. 视复杂度再从 `background.js` 拆出 AI 批处理与通知；Provider 请求构建已经独立。
 4. 为 `ai-core.js` 增加无需浏览器环境的单元测试，覆盖过滤、去重、状态流转和 list-only 规则。
