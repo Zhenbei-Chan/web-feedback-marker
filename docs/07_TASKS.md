@@ -231,3 +231,110 @@ Do not read unless needed:
 
 - 执行 `docs/08_TEST_PLAN.md` 中的核心用例。
 - 插件可在 Chrome 开发者模式重新加载。
+
+## Task 6：本地页面、AI Provider 与连续快照结构性修复
+
+状态：页面访问和 AI Provider 已完成；原滚动拼接快照方案被 Task 7 的 CDP 实现替代。
+
+### Goal
+
+从页面访问能力、AI 协议适配和截图坐标模型三个边界修复已知问题，避免继续在 Popup、Background 和 Content 中重复拼接规则。
+
+### Relevant files
+
+- `manifest.json`
+- `src/page-access.js`
+- `src/ai-provider.js`
+- `src/snapshot-core.js`
+- `src/popup.html`
+- `src/popup.js`
+- `src/background.js`
+- `src/content.js`
+- `tests/page-access-smoke.js`
+- `tests/ai-provider-smoke.js`
+- `tests/snapshot-core-smoke.js`
+
+### Non-goals
+
+- 不支持 `chrome://`、Chrome 商店、浏览器设置页等受保护页面。
+- 不接管本地 HTML 引用的失效资源，也不把原网页资源打包进报告。
+- 不为任意私有 AI 协议做自动猜测；自定义服务仍明确限定为 OpenAI-compatible。
+- 不使用远程截图服务。
+
+### Acceptance criteria
+
+- `file://` HTML 在用户开启 Chrome“允许访问文件网址”后可进入批注、AI 检查和导出流程；未开启时显示可执行的中文说明。
+- AI 设置中提供独立的 Google Gemini 选项，使用原生 `generateContent` 协议和 `x-goog-api-key`；OpenAI-compatible 自定义服务继续使用 Bearer 鉴权。
+- Provider 的预设、校验、请求构建和响应读取集中在单一模块。
+- 快照 HTML 从页面顶部连续截到导出时确定的页面底部，不再只截标记附近的离散片段。
+- 固定/吸顶导航不重复覆盖正文；最终实现见 Task 7。
+- 截图连续性验收由 Task 7 的 CDP 文档坐标方案负责。
+
+### Verification
+
+- 执行新增三组 Node smoke tests 和既有 AI tests。
+- 对 `manifest.json` 和所有脚本执行语法检查。
+- 使用固定长页面验证完整覆盖；最终截图机制回归见 Task 7。
+- Chrome 手动验收本地 HTML 权限开关、Gemini 真 Key 和真实长页面快照；若当前环境不能自动完成，必须明确列为待实测项。
+
+### Context Budget
+
+Required docs:
+
+- `docs/00_PROJECT_STATUS.md`
+- `docs/01_REQUIREMENTS.md`
+- `docs/UI_SPEC.md`
+- `docs/07_TASKS.md`
+
+Required code files:
+
+- `manifest.json`
+- `src/popup.html`
+- `src/popup.js`
+- `src/background.js`
+- `src/content.js`
+
+Do not read unless needed:
+
+- `src/pdf.js`
+- `src/ai-core.js`
+
+## Task 7：CDP 连续整页截图
+
+状态：代码与自动化回归已完成；真实 Chrome 长页面视觉验收进行中。
+
+### Goal
+
+从截图机制上消除滚动拼接造成的正文割裂、重复吸顶导航和动态页面高度错位。
+
+### Relevant files
+
+- `manifest.json`
+- `src/cdp-capture.js`
+- `src/snapshot-core.js`
+- `src/background.js`
+- `src/content.js`
+- `tests/cdp-capture-smoke.js`
+- `tests/snapshot-core-smoke.js`
+- `tests/snapshot-export-contract-smoke.js`
+
+### Non-goals
+
+- 不使用远程截图服务。
+- 不改变单条人工反馈的局部证据截图方式。
+- 不读取网络请求、控制台日志或执行脚本调试。
+
+### Acceptance criteria
+
+- HTML 快照导出不再调用逐屏 `captureVisibleTab`。
+- Background 通过 `chrome.debugger` 调用 `Page.getLayoutMetrics` 与 `Page.captureScreenshot`。
+- 普通长度页面优先单段截图；超长页面按固定文档坐标连续分片。
+- 任意相邻分片之间无空洞、无重叠，固定/吸顶导航不因分片重复。
+- attach 成功后，无论截图成功或失败都执行 detach。
+- DevTools 占用、标签页关闭、权限受限和截图失败均返回中文可执行提示。
+
+### Verification
+
+- 执行三组快照 smoke tests。
+- 对全部脚本执行语法检查。
+- 使用 `tests/fixtures/snapshot-long.html` 在真实 Chrome 中导出并检查顶部、中部、底部连续性。

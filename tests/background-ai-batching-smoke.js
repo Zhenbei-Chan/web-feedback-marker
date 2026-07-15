@@ -3,6 +3,9 @@ const path = require("path");
 const vm = require("vm");
 
 const aiCoreSource = fs.readFileSync(path.join(__dirname, "..", "src", "ai-core.js"), "utf8");
+const aiProviderSource = fs.readFileSync(path.join(__dirname, "..", "src", "ai-provider.js"), "utf8");
+const snapshotCoreSource = fs.readFileSync(path.join(__dirname, "..", "src", "snapshot-core.js"), "utf8");
+const cdpCaptureSource = fs.readFileSync(path.join(__dirname, "..", "src", "cdp-capture.js"), "utf8");
 const backgroundSource = fs.readFileSync(path.join(__dirname, "..", "src", "background.js"), "utf8");
 
 const listeners = [];
@@ -11,9 +14,20 @@ const context = {
   setTimeout,
   clearTimeout,
   fetch: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: "[]" } }] }) }),
-  importScripts(file) {
-    if (file === "ai-core.js") {
-      vm.runInContext(aiCoreSource, context);
+  importScripts(...files) {
+    for (const file of files) {
+      if (file === "ai-core.js") {
+        vm.runInContext(aiCoreSource, context);
+      }
+      if (file === "ai-provider.js") {
+        vm.runInContext(aiProviderSource, context);
+      }
+      if (file === "snapshot-core.js") {
+        vm.runInContext(snapshotCoreSource, context);
+      }
+      if (file === "cdp-capture.js") {
+        vm.runInContext(cdpCaptureSource, context);
+      }
     }
   },
   chrome: {
@@ -24,6 +38,11 @@ const context = {
     tabs: {
       sendMessage: () => Promise.resolve(),
       captureVisibleTab: () => Promise.resolve("")
+    },
+    debugger: {
+      attach: () => Promise.resolve(),
+      sendCommand: () => Promise.resolve({}),
+      detach: () => Promise.resolve()
     },
     notifications: {
       create: () => Promise.resolve(),
@@ -76,11 +95,6 @@ if (embeddedItems.length !== 1) {
 const noIssueItems = vm.runInContext("parseJsonArray('未发现问题。')", context);
 if (noIssueItems.length !== 0) {
   throw new Error("Expected no-issue text to become an empty result");
-}
-
-const structuredFormat = vm.runInContext("getStructuredResponseFormat({ provider: 'zhipu' })", context);
-if (structuredFormat.response_format?.type !== "json_object") {
-  throw new Error("Expected Zhipu requests to use JSON object response format");
 }
 
 console.log("background ai batching smoke passed");

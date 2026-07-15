@@ -7,13 +7,15 @@
 - 未发现核心人工批注能力被删除。
 - 未发现快照 HTML / PDF 导出入口被删除。
 - 未发现 AI 检查主流程入口被删除。
-- 当前仍需要浏览器内手动验证：真实系统通知、真实 AI 服务请求、Chrome 可选域名权限弹窗、复杂网页文本定位。
+- 已补齐本地 HTML、Gemini 原生 Provider、AI 重新设置入口和 CDP 连续整页快照。
+- 当前仍需要浏览器内手动验证：本地文件权限开关、真实系统通知、真实 Gemini Key、Chrome 可选域名权限弹窗、复杂网页文本定位与真实长页面快照。
 
 ## 功能追踪表
 
 | 需求 | 当前实现位置 | 状态 |
 | --- | --- | --- |
 | 进入批注模式 | `popup.js` 发送 `START_ANNOTATION_MODE`，`content.js` 接收 | 已实现，需浏览器回归 |
+| 本地 HTML 批注 | `manifest.json` `file:///*`、`page-access.js`、`popup.js` | 已实现，页面访问冒烟测试通过，需 Chrome 权限开关回归 |
 | 标记点反馈 | `content.js` 悬浮菜单、草稿、保存流程 | 已实现，需浏览器回归 |
 | 区域反馈 | `content.js` 框选、截图证据、区域 hover | 已实现，需浏览器回归 |
 | 文本反馈下划线 | `content.js` `shouldRenderManualTextMarker`、`renderTextRangeMarker` | 已实现，需浏览器回归 |
@@ -23,8 +25,13 @@
 | 悬浮入口拖动/吸附/避让 | `content.js` dock state、position、avoidance | 已实现，需浏览器回归 |
 | 快捷键 | `content.js` `onShortcutKeyDown` | 已实现，需浏览器回归 |
 | 快照 HTML 导出 | `popup.js` `EXPORT_HTML_REPORT`，`content.js` 快照生成 | 已实现，需浏览器回归 |
+| 连续整页快照 | `cdp-capture.js` CDP 文档坐标截图，`snapshot-core.js` 连续分片 | 已实现，模块、契约和调试会话测试通过，需真实长页面回归 |
+| 截图限流保护 | `background.js` `captureVisibleTabSafely` | 已实现，契约测试通过 |
 | PDF 导出 | `popup.js` 调用 `WebFeedbackPdf.exportFeedbackPdf`，`pdf.js` | 已实现，需浏览器回归 |
-| AI 设置 | `popup.js` AI 设置表单和可选域名授权 | 已实现，需浏览器回归 |
+| AI 设置 | `popup.js` 常驻设置入口和可选域名授权，`ai-provider.js` Provider 设置规则 | 已实现，Provider 测试通过，需浏览器回归 |
+| Gemini 原生 Provider | `ai-provider.js` `generateContent`、`x-goog-api-key`、响应提取与旧设置迁移 | 已实现，Provider 测试通过，需真 Key 回归 |
+| OpenAI-compatible 自定义服务 | `ai-provider.js` Chat Completions、Bearer 鉴权 | 已实现，Provider 测试通过 |
+| Provider Key 隔离 | `ai-provider.js` `resolveApiKey` | 已实现，不跨 Provider 复用 Key，测试通过 |
 | Mock AI Provider | `background.js` `requestMockBatchScan` | 已实现，可本地逻辑验证 |
 | AI 长文本拆分 | `background.js` `splitOversizedBlocks`、`splitTextIntoChunks` | 已实现，已加冒烟测试 |
 | AI 标准化/过滤/去重 | `src/ai-core.js` | 已实现，已加冒烟测试 |
@@ -48,6 +55,7 @@
 
 ## 回归建议
 
-1. 每次改动 AI 逻辑，先运行 `tests/ai-core-smoke.js` 和 `tests/background-ai-batching-smoke.js`。
+1. 每次改动 AI 逻辑，先运行 `tests/ai-core-smoke.js`、`tests/ai-provider-smoke.js` 和 `tests/background-ai-batching-smoke.js`。
 2. 每次改动页面交互，至少执行 `docs/08_TEST_PLAN.md` 中人工批注、AI Mock、删除、清空、导出用例。
 3. 每次改动权限或通知，必须在 Chrome 中手动验证系统通知开/关两种场景。
+4. 每次改动快照逻辑，运行 `tests/snapshot-core-smoke.js`、`tests/cdp-capture-smoke.js`、`tests/snapshot-export-contract-smoke.js`，并用 `tests/fixtures/snapshot-long.html` 手动导出一次。

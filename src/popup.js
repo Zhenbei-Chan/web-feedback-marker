@@ -4,6 +4,8 @@ const AI_SETTINGS_KEY = "webFeedbackAssistant.aiSettings";
 const AI_SCAN_STATE_KEY = "webFeedbackAssistant.aiScanState";
 const GUIDE_SEEN_KEY = "webFeedbackAssistant.popupGuideSeen";
 const AiCore = globalThis.WebFeedbackAiCore || createPopupAiCoreFallback();
+const PageAccess = globalThis.WebFeedbackPageAccess;
+const AiProvider = globalThis.WebFeedbackAiProvider;
 
 
 function createPopupAiCoreFallback() {
@@ -41,27 +43,9 @@ function mapFallbackAiCategory(errorType) {
   }
   return "其他";
 }
-const AI_PROVIDER_PRESETS = {
-  zhipu: {
-    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    model: "glm-4-flash"
-  },
-  deepseek: {
-    baseUrl: "https://api.deepseek.com",
-    model: "deepseek-chat"
-  },
-  mock: {
-    baseUrl: "",
-    model: "mock-fixed-json"
-  },
-  custom: {
-    baseUrl: "",
-    model: ""
-  }
-};
-
 const state = {
   tab: null,
+  pageAccessible: false,
   guideSeen: true,
   guideVisible: false,
   page: {
@@ -91,6 +75,7 @@ const els = {
   guideDismissBtn: document.querySelector("#guideDismissBtn"),
   startAnnotationBtn: document.querySelector("#startAnnotationBtn"),
   aiScanBtn: document.querySelector("#aiScanBtn"),
+  aiSettingsOpenBtn: document.querySelector("#aiSettingsOpenBtn"),
   aiSettingsPanel: document.querySelector("#aiSettingsPanel"),
   aiSettingsCloseBtn: document.querySelector("#aiSettingsCloseBtn"),
   aiSettingsSaveBtn: document.querySelector("#aiSettingsSaveBtn"),
@@ -98,6 +83,7 @@ const els = {
   aiBaseUrlInput: document.querySelector("#aiBaseUrlInput"),
   aiModelInput: document.querySelector("#aiModelInput"),
   aiApiKeyInput: document.querySelector("#aiApiKeyInput"),
+  aiProviderHint: document.querySelector("#aiProviderHint"),
   exportHtmlBtn: document.querySelector("#exportHtmlBtn"),
   exportPdfBtn: document.querySelector("#exportPdfBtn"),
   clearCurrentBtn: document.querySelector("#clearCurrentBtn")
@@ -110,7 +96,13 @@ async function init() {
 
   try {
     [state.tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    ensureHttpLikePage();
+    state.page = {
+      title: state.tab?.title || "",
+      url: state.tab?.url || "",
+      selectionText: ""
+    };
+    await ensurePageAccess();
+    state.pageAccessible = true;
     await injectContentScripts();
     await refreshPageContext();
     await loadGuideState();
@@ -122,6 +114,7 @@ async function init() {
       setStatus("已读取当前页面。");
     }
   } catch (error) {
+    render();
     setStatus(getFriendlyErrorMessage(error, "初始化失败。"), true);
   }
 }
@@ -129,6 +122,7 @@ async function init() {
 function bindEvents() {
   els.startAnnotationBtn.addEventListener("click", startAnnotationMode);
   els.aiScanBtn.addEventListener("click", scanCurrentPageWithAi);
+  els.aiSettingsOpenBtn.addEventListener("click", openAiSettings);
   els.aiSettingsCloseBtn.addEventListener("click", () => setAiSettingsVisible(false));
   els.aiSettingsSaveBtn.addEventListener("click", saveAiSettings);
   els.aiProviderSelect.addEventListener("change", applyAiProviderPreset);
@@ -146,7 +140,7 @@ function bindEvents() {
 async function injectContentScripts() {
   await chrome.scripting.executeScript({
     target: { tabId: state.tab.id },
-    files: ["src/ai-core.js", "src/pdf.js", "src/content.js"]
+    files: ["src/ai-core.js", "src/snapshot-core.js", "src/pdf.js", "src/content.js"]
   });
 }
 
@@ -162,7 +156,7 @@ async function refreshPageContext() {
 
 async function startAnnotationMode() {
   try {
-    ensureHttpLikePage();
+    await ensurePageAccess();
     await markGuideSeen();
     await injectContentScripts();
     await chrome.tabs.sendMessage(state.tab.id, { type: "START_ANNOTATION_MODE" });
@@ -174,7 +168,7 @@ async function startAnnotationMode() {
 
 async function scanCurrentPageWithAi() {
   try {
-    ensureHttpLikePage();
+    await ensurePageAccess();
     await loadAiState();
     await reconcileAiScanState();
 
@@ -184,7 +178,7 @@ async function scanCurrentPageWithAi() {
       return;
     }
 
-    await ensureAiHostPermission(state.aiSettings.baseUrl);
+    await ensureAiHostPermission(state.aiSettings);
     await injectContentScripts();
     startAiProgress("正在启动 AI 检查任务...");
 
@@ -317,12 +311,12 @@ function formatAiScanResult(response) {
 async function saveAiSettings() {
   try {
     const settings = readAiSettingsForm();
-    if (!isAiConfigured(settings)) {
+    if (!AiProvider.isConfigured(settings)) {
       setStatus("请填写完整的 AI 检查设置。", true);
       return;
     }
 
-    await ensureAiHostPermission(settings.baseUrl);
+    await ensureAiHostPermission(settings);
     await chrome.storage.local.set({ [AI_SETTINGS_KEY]: settings });
     state.aiSettings = settings;
     setAiSettingsVisible(false);
@@ -333,27 +327,44 @@ async function saveAiSettings() {
 }
 
 function readAiSettingsForm() {
+  const provider = els.aiProviderSelect.value || "custom";
   return {
     enabled: true,
-    provider: els.aiProviderSelect.value || "custom",
+    provider,
     baseUrl: els.aiBaseUrlInput.value.trim(),
     model: els.aiModelInput.value.trim(),
-    apiKey: els.aiApiKeyInput.value.trim() || state.aiSettings?.apiKey || ""
+    apiKey: AiProvider.resolveApiKey(provider, els.aiApiKeyInput.value, state.aiSettings)
   };
 }
 
-function applyAiProviderPreset() {
-  const preset = AI_PROVIDER_PRESETS[els.aiProviderSelect.value] || AI_PROVIDER_PRESETS.custom;
-  els.aiBaseUrlInput.value = preset.baseUrl;
-  els.aiModelInput.value = preset.model;
+async function openAiSettings() {
+  try {
+    await loadAiState();
+    setAiSettingsVisible(true);
+    els.aiProviderSelect.focus();
+  } catch (error) {
+    setStatus(getFriendlyErrorMessage(error, "无法打开 AI 设置。"), true);
+  }
 }
 
-async function ensureAiHostPermission(baseUrl) {
-  if (els.aiProviderSelect.value === "mock") {
+function applyAiProviderPreset() {
+  const preset = AiProvider.getPreset(els.aiProviderSelect.value);
+  els.aiBaseUrlInput.value = preset.baseUrl;
+  els.aiModelInput.value = preset.model;
+  els.aiApiKeyInput.value = "";
+  const storedProvider = AiProvider.normalizeSettings(state.aiSettings || {}).provider;
+  els.aiApiKeyInput.placeholder = storedProvider === els.aiProviderSelect.value
+    ? "已保存；留空保持不变"
+    : "请输入该服务的 API Key";
+  els.aiProviderHint.textContent = preset.hint;
+}
+
+async function ensureAiHostPermission(settings) {
+  if (settings?.provider === "mock") {
     return;
   }
 
-  const origin = getOriginPattern(baseUrl);
+  const origin = AiProvider.getOriginPattern(settings?.baseUrl);
   const hasPermission = await chrome.permissions.contains({ origins: [origin] });
   if (hasPermission) {
     return;
@@ -365,30 +376,13 @@ async function ensureAiHostPermission(baseUrl) {
   }
 }
 
-function getOriginPattern(baseUrl) {
-  let url;
-  try {
-    url = new URL(baseUrl);
-  } catch (_error) {
-    throw new Error("AI 服务地址无效。");
-  }
-
-  if (!["https:", "http:"].includes(url.protocol)) {
-    throw new Error("AI 服务地址必须是 http 或 https。");
-  }
-
-  return `${url.origin}/*`;
-}
-
 function isAiConfigured(settings) {
-  if (settings?.provider === "mock") {
-    return true;
-  }
-  return Boolean(settings?.enabled && settings.baseUrl && settings.model && settings.apiKey);
+  return AiProvider.isConfigured(settings);
 }
 
 async function exportCurrentPageHtml() {
   try {
+    await ensurePageAccess();
     const items = getDisplayPageItems();
     if (!items.length) {
       setStatus("当前页面没有可导出的反馈。", true);
@@ -501,7 +495,9 @@ async function loadItems() {
 async function loadAiState() {
   const result = await chrome.storage.local.get([AI_FINDINGS_KEY, AI_SETTINGS_KEY, AI_SCAN_STATE_KEY]);
   state.aiFindings = AiCore.normalizeStoredFindings(Array.isArray(result[AI_FINDINGS_KEY]) ? result[AI_FINDINGS_KEY] : []);
-  state.aiSettings = result[AI_SETTINGS_KEY] || null;
+  state.aiSettings = result[AI_SETTINGS_KEY]
+    ? AiProvider.normalizeSettings(result[AI_SETTINGS_KEY])
+    : null;
   state.aiScanState = result[AI_SCAN_STATE_KEY] || null;
   fillAiSettingsForm();
 }
@@ -537,9 +533,14 @@ async function reconcileAiScanState() {
 function fillAiSettingsForm() {
   const settings = state.aiSettings || {};
   els.aiProviderSelect.value = settings.provider || "zhipu";
-  els.aiBaseUrlInput.value = settings.baseUrl || AI_PROVIDER_PRESETS[els.aiProviderSelect.value]?.baseUrl || "";
-  els.aiModelInput.value = settings.model || AI_PROVIDER_PRESETS[els.aiProviderSelect.value]?.model || "";
+  const preset = AiProvider.getPreset(els.aiProviderSelect.value);
+  els.aiBaseUrlInput.value = settings.baseUrl || preset.baseUrl;
+  els.aiModelInput.value = settings.model || preset.model;
   els.aiApiKeyInput.value = "";
+  els.aiApiKeyInput.placeholder = settings.apiKey
+    ? "已保存；留空保持不变"
+    : "只保存在本地";
+  els.aiProviderHint.textContent = preset.hint;
 }
 
 async function loadGuideState() {
@@ -555,10 +556,11 @@ function render() {
   const items = getDisplayPageItems();
   const aiFindings = getDisplayAiFindings();
   els.currentCount.textContent = `共 ${items.length} 条，AI ${aiFindings.length} 条`;
-  els.exportHtmlBtn.disabled = items.length === 0;
   els.exportPdfBtn.disabled = items.length === 0 && aiFindings.length === 0;
   els.clearCurrentBtn.disabled = items.length === 0 && aiFindings.length === 0;
-  els.aiScanBtn.disabled = !state.page.url;
+  els.startAnnotationBtn.disabled = !state.pageAccessible;
+  els.exportHtmlBtn.disabled = !state.pageAccessible || items.length === 0;
+  els.aiScanBtn.disabled = !state.pageAccessible || !state.page.url;
   renderAiScanState();
 
   setGuideVisible(state.guideVisible);
@@ -731,14 +733,24 @@ async function deleteAiFinding(itemId) {
   setStatus("已移除 1 条 AI 待确认结果。");
 }
 
-function ensureHttpLikePage() {
+async function ensurePageAccess() {
   if (!state.tab?.id) {
     throw new Error("没有找到当前标签页。");
   }
 
-  if (!/^https?:\/\//i.test(state.tab.url || "")) {
-    throw new Error("请在普通网页中使用。");
+  const kind = PageAccess.classifyUrl(state.tab.url || "");
+  let fileAccessAllowed = false;
+  if (kind === PageAccess.PAGE_KIND.LOCAL_FILE) {
+    fileAccessAllowed = Boolean(await chrome.extension.isAllowedFileSchemeAccess());
   }
+  const errorMessage = PageAccess.getAccessError({
+    url: state.tab.url || "",
+    fileAccessAllowed
+  });
+  if (errorMessage) {
+    throw new Error(errorMessage);
+  }
+  state.pageAccessible = true;
 }
 
 function getTypeText(item) {
@@ -867,7 +879,7 @@ function getFriendlyErrorMessage(error, fallback = "操作失败。") {
   }
 
   if (/Cannot access contents|The extensions gallery|chrome:\/\/|edge:\/\//i.test(rawMessage)) {
-    return "当前页面不允许插件注入脚本。请在普通网页中使用，或刷新页面后重试。";
+    return "当前页面不允许插件注入脚本。请在普通网页或已授权的本地 HTML 文件中使用；如果是本地文件，请确认已开启“允许访问文件网址”并刷新页面。";
   }
 
   if (/Failed to fetch|NetworkError|network/i.test(rawMessage)) {

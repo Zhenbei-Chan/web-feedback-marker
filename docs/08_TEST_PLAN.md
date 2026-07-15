@@ -8,8 +8,16 @@
 
 1. 在 `chrome://extensions/` 重新加载扩展。
 2. 刷新测试网页。
-3. 准备三类页面：普通正文页、跨节点文本页、无正文/复杂导航页。
+3. 准备四类页面：普通正文页、跨节点文本页、无正文/复杂导航页、`tests/fixtures/snapshot-long.html` 本地长页面。
 4. AI 测试优先使用 Mock 测试模式；真实服务测试另行验证网络和权限。
+
+## 基础访问
+
+### TC-BASE-001 本地 HTML 权限
+
+- 关闭插件“允许访问文件网址”，打开 `tests/fixtures/snapshot-long.html`，Popup 应禁用页面操作并给出完整开关路径。
+- 开启权限并刷新本地 HTML，Popup 能读取标题和 URL，能进入批注模式、发起 Mock AI 检查并导出。
+- `chrome://extensions/` 和 Chrome 商店仍显示受保护页面提示。
 
 ## 核心人工批注
 
@@ -77,10 +85,17 @@
 
 ### TC-AI-002 保存设置与权限
 
-- 配置智谱、DeepSeek、自定义服务或 Mock。
+- 配置智谱、DeepSeek、Google Gemini、自定义服务或 Mock。
 - 保存后设置保留。
 - API Key 不明文回填完整值。
 - 非 Mock 服务按 Base URL 请求可选域名权限。
+- 已配置后可从 AI 功能区重新进入设置；从智谱切换到 Gemini 且未填写新 Key 时不得保存旧智谱 Key。
+
+### TC-AI-002B Gemini 原生协议
+
+- 选择 Google Gemini，使用有效 Key 和 `gemini-3.5-flash` 执行检查。
+- 请求地址应为 `.../models/gemini-3.5-flash:generateContent`，使用 `x-goog-api-key`，不发送 Bearer 鉴权。
+- 将旧设置保存为 `custom + https://generativelanguage.googleapis.com/v1beta` 后重新加载，应自动使用 Gemini 原生适配。
 
 ### TC-AI-003 Mock 检查
 
@@ -148,11 +163,18 @@
 
 ### TC-EXPORT-001 快照 HTML
 
+- 从旧版本重新加载 0.5.15，确认 Chrome 对新增 `debugger` 权限的提示可正常完成，扩展保持启用。
 - 添加标记点、区域和文本反馈后导出快照 HTML。
 - HTML 可独立打开。
 - 主体为截图快照。
 - 右上角“修改点全览”显示反馈内容、分类和日期。
 - 点击条目跳转并高亮对应标记。
+- 使用 `tests/fixtures/snapshot-long.html` 验证截图从顶部连续到页面底部。
+- 验证 HTML 快照路径发送 `CAPTURE_FULL_PAGE_CDP`，不发送 `CAPTURE_VISIBLE_TAB`。
+- 固定顶部导航只出现一次，吸顶章节标题不因 CDP 分片重复覆盖后续正文。
+- 超长页面分片使用固定文档坐标，截图片段之间没有卡片间距、空洞或重复内容。
+- 模拟 `Page.captureScreenshot` 失败，确认 `chrome.debugger.detach` 仍被调用并显示中文解决建议。
+- 在目标页打开 DevTools 后触发导出，应提示关闭开发者工具；关闭后重试可正常导出。
 
 ### TC-EXPORT-002 PDF
 

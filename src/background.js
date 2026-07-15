@@ -1,22 +1,36 @@
-importScripts("ai-core.js");
+importScripts("ai-core.js", "ai-provider.js", "snapshot-core.js", "cdp-capture.js");
 
 const AiCore = globalThis.WebFeedbackAiCore;
+const AiProvider = globalThis.WebFeedbackAiProvider;
+const CdpCapture = globalThis.WebFeedbackCdpCapture;
 const AI_SETTINGS_KEY = "webFeedbackAssistant.aiSettings";
 const AI_SCAN_MAX_RETRIES = 2;
 const AI_SCAN_BATCH_MAX_CHARS = 900;
 const AI_SCAN_BLOCK_MAX_CHARS = 900;
 const AI_REQUEST_TIMEOUT_MS = 45000;
+const CAPTURE_MIN_INTERVAL_MS = 550;
 
 const NOTIFICATION_ICON = "assets/icons/icon-128.png";
 const notificationTargets = new Map();
+let captureQueue = Promise.resolve();
+let fullPageCaptureQueue = Promise.resolve();
+let lastCaptureAt = 0;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "CAPTURE_VISIBLE_TAB") {
     const windowId = sender.tab?.windowId;
-    chrome.tabs
-      .captureVisibleTab(windowId, { format: "png" })
+    captureVisibleTabSafely(windowId)
       .then((dataUrl) => sendResponse({ dataUrl }))
       .catch((error) => sendResponse({ error: error.message || "截图失败。" }));
+
+    return true;
+  }
+
+  if (message?.type === "CAPTURE_FULL_PAGE_CDP") {
+    const tabId = sender.tab?.id;
+    captureFullPageSafely(tabId)
+      .then((snapshot) => sendResponse({ snapshot }))
+      .catch((error) => sendResponse({ error: error.message || "整页截图失败。" }));
 
     return true;
   }
@@ -87,6 +101,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return false;
 });
+
+function captureVisibleTabSafely(windowId) {
+  const operation = captureQueue.then(async () => {
+    const waitMs = Math.max(0, CAPTURE_MIN_INTERVAL_MS - (Date.now() - lastCaptureAt));
+    if (waitMs > 0) {
+      await wait(waitMs);
+    }
+    try {
+      return await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+    } finally {
+      lastCaptureAt = Date.now();
+    }
+  });
+  captureQueue = operation.catch(() => {});
+  return operation;
+}
+
+function captureFullPageSafely(tabId) {
+  const operation = fullPageCaptureQueue.then(() => CdpCapture.captureFullPage(tabId, chrome.debugger));
+  fullPageCaptureQueue = operation.catch(() => {});
+  return operation;
+}
 
 if (chrome.notifications?.onClicked) {
   chrome.notifications.onClicked.addListener((notificationId) => {
@@ -349,21 +385,11 @@ function reportAiScanProgress(sender, progress) {
 
 async function loadAiSettings() {
   const result = await chrome.storage.local.get(AI_SETTINGS_KEY);
-  return result[AI_SETTINGS_KEY] || {};
+  return AiProvider.normalizeSettings(result[AI_SETTINGS_KEY] || {});
 }
 
 function validateAiSettings(settings) {
-  if (settings.provider === "mock") {
-    return;
-  }
-
-  if (!settings.enabled) {
-    throw new Error("AI 检查未启用，请先完成设置。");
-  }
-
-  if (!settings.baseUrl || !settings.model || !settings.apiKey) {
-    throw new Error("AI 检查设置不完整，请填写服务地址、模型和 API Key。");
-  }
+  AiProvider.validateSettings(settings);
 }
 
 function splitOversizedBlocks(blocks) {
@@ -486,52 +512,10 @@ async function requestBatchScan(settings, batch) {
   let response;
 
   try {
-    response = await fetch(getChatCompletionsUrl(settings), {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Authorization": `Bearer ${settings.apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        temperature: 0.1,
-        max_tokens: 700,
-        ...getStructuredResponseFormat(settings),
-        messages: [
-          {
-            role: "system",
-            content: [
-              "你是专业的中文网页内容校对助手。",
-              "请使用严格低错模式，只检查客观、可证明、可直接定位的错误。",
-              "只允许返回这些类型：错别字、错字、别字、多字、漏字、重复字、标点错误、占位符遗漏、占位文本、日期错误、数字错误、单位错误。",
-              "不要返回主观表达建议、风格优化、语气优化、普通改写建议、结构建议、标题吸引力建议。",
-              "不要判断金额、价格、编号、统计数字是否真实，除非同一段文本内部明显自相矛盾。",
-              "如果只是读起来不够顺、不够精炼、可优化，但没有明确错误，不要返回。",
-              "错别字、错字、别字、多字、漏字、重复字必须只返回最短错误片段，不要返回整句改写。",
-              "错别字建议必须保留原文语义、词性和语气，只做最小文字纠错；不要用近义词、推测词或更书面的表达替换原文。",
-              "例如“属是”在表示确实、的确的语境里应建议为“属实”，不要改成“似乎”这类语义改写；无法确认时返回空数组。",
-              "如果 original_text 和 suggested_text 相同，或只差空格、大小写、英文品牌大小写，不要返回。",
-              "如果 reason 表示没有错误、只是建议检查、无法确定、可能更好，不要返回。",
-              "每条结果必须能指出原文、建议文本和明确原因，confidence 必须大于等于 0.82。",
-              "只返回 JSON 对象，不要返回解释性文字、Markdown 代码块或自然语言说明。",
-              "固定格式为：{\"items\": []}。",
-              "如果没有问题，返回 {\"items\": []}。"
-            ].join("\n")
-          },
-          {
-            role: "user",
-            content: [
-              "请检查以下网页文本块，并按字段返回：",
-              "返回 JSON 对象，items 数组里的每一项包含：block_id, error_type, original_text, suggested_text, reason, severity, confidence, context。",
-              "block_id 必须使用文本块标题里的 block_id，例如 block_1。",
-              "只返回高确定性的低级错误；不确定时宁可返回空数组。",
-              "文本块：",
-              formatBatchText(batch.blocks)
-            ].join("\n")
-          }
-        ]
-      })
+    const request = AiProvider.buildRequest(settings, buildBatchPrompt(batch));
+    response = await fetch(request.url, {
+      ...request.options,
+      signal: controller.signal
     });
   } catch (error) {
     const normalized = normalizeAiErrorMessage(error?.name === "AbortError"
@@ -552,8 +536,21 @@ async function requestBatchScan(settings, batch) {
     throw error;
   }
 
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content || "";
+  let data;
+  try {
+    data = await response.json();
+  } catch (_error) {
+    const wrapped = new Error("AI 服务返回的响应不是有效 JSON。");
+    wrapped.retryable = true;
+    throw wrapped;
+  }
+
+  const content = AiProvider.readResponseText(settings.provider, data);
+  if (!content) {
+    const wrapped = new Error("AI 服务没有返回检查结果，可能是模型响应为空或内容被服务商拦截。");
+    wrapped.retryable = true;
+    throw wrapped;
+  }
   try {
     return AiCore.normalizeProviderFindings(parseJsonArray(content))
       .map((finding) => assignFindingBlockId(finding, batch))
@@ -563,6 +560,37 @@ async function requestBatchScan(settings, batch) {
     wrapped.retryable = true;
     throw wrapped;
   }
+}
+
+function buildBatchPrompt(batch) {
+  return {
+    maxOutputTokens: 700,
+    systemPrompt: [
+      "你是专业的中文网页内容校对助手。",
+      "请使用严格低错模式，只检查客观、可证明、可直接定位的错误。",
+      "只允许返回这些类型：错别字、错字、别字、多字、漏字、重复字、标点错误、占位符遗漏、占位文本、日期错误、数字错误、单位错误。",
+      "不要返回主观表达建议、风格优化、语气优化、普通改写建议、结构建议、标题吸引力建议。",
+      "不要判断金额、价格、编号、统计数字是否真实，除非同一段文本内部明显自相矛盾。",
+      "如果只是读起来不够顺、不够精炼、可优化，但没有明确错误，不要返回。",
+      "错别字、错字、别字、多字、漏字、重复字必须只返回最短错误片段，不要返回整句改写。",
+      "错别字建议必须保留原文语义、词性和语气，只做最小文字纠错；不要用近义词、推测词或更书面的表达替换原文。",
+      "例如“属是”在表示确实、的确的语境里应建议为“属实”，不要改成“似乎”这类语义改写；无法确认时返回空数组。",
+      "如果 original_text 和 suggested_text 相同，或只差空格、大小写、英文品牌大小写，不要返回。",
+      "如果 reason 表示没有错误、只是建议检查、无法确定、可能更好，不要返回。",
+      "每条结果必须能指出原文、建议文本和明确原因，confidence 必须大于等于 0.82。",
+      "只返回 JSON 对象，不要返回解释性文字、Markdown 代码块或自然语言说明。",
+      "固定格式为：{\"items\": []}。",
+      "如果没有问题，返回 {\"items\": []}。"
+    ].join("\n"),
+    userPrompt: [
+      "请检查以下网页文本块，并按字段返回：",
+      "返回 JSON 对象，items 数组里的每一项包含：block_id, error_type, original_text, suggested_text, reason, severity, confidence, context。",
+      "block_id 必须使用文本块标题里的 block_id，例如 block_1。",
+      "只返回高确定性的低级错误；不确定时宁可返回空数组。",
+      "文本块：",
+      formatBatchText(batch.blocks)
+    ].join("\n")
+  };
 }
 
 async function requestMockBatchScan(batch) {
@@ -644,16 +672,6 @@ function assignFindingBlockId(finding, batch) {
   };
 }
 
-function getStructuredResponseFormat(settings) {
-  if (settings.provider === "zhipu" || settings.provider === "deepseek") {
-    return {
-      response_format: { type: "json_object" }
-    };
-  }
-
-  return {};
-}
-
 function isRetryableAiError(error) {
   return error?.retryable === true || /500|502|503|504|timeout|network|Failed to fetch/i.test(String(error?.message || ""));
 }
@@ -715,21 +733,6 @@ function normalizeAiErrorMessage(message) {
   }
 
   return text;
-}
-
-function normalizeBaseUrl(value) {
-  return String(value || "").trim().replace(/\/+$/, "");
-}
-
-function getChatCompletionsUrl(settings) {
-  const baseUrl = normalizeBaseUrl(settings.baseUrl);
-  if (/\/chat\/completions$/i.test(baseUrl)) {
-    return baseUrl;
-  }
-  if (settings.provider === "zhipu" || /\/v\d+$/i.test(baseUrl)) {
-    return `${baseUrl}/chat/completions`;
-  }
-  return `${baseUrl}/v1/chat/completions`;
 }
 
 function parseJsonArray(content) {
